@@ -66,3 +66,43 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 
     # Add user defined libraries
 )
+
+# Generate programmer-friendly images together with the ELF file.
+add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_OBJCOPY} -O ihex
+            $<TARGET_FILE:${CMAKE_PROJECT_NAME}>
+            $<TARGET_FILE_DIR:${CMAKE_PROJECT_NAME}>/${CMAKE_PROJECT_NAME}.hex
+    COMMAND ${CMAKE_OBJCOPY} -O binary
+            $<TARGET_FILE:${CMAKE_PROJECT_NAME}>
+            $<TARGET_FILE_DIR:${CMAKE_PROJECT_NAME}>/${CMAKE_PROJECT_NAME}.bin
+    COMMAND ${CMAKE_SIZE} $<TARGET_FILE:${CMAKE_PROJECT_NAME}>
+    COMMENT "Generating HEX/BIN images and printing firmware size"
+    VERBATIM
+)
+
+# DAPLink is a CMSIS-DAP probe. Keep flashing optional so hosts without
+# OpenOCD can still configure and compile the firmware.
+set(OPENOCD_INTERFACE "interface/cmsis-dap.cfg" CACHE STRING
+    "OpenOCD interface configuration")
+set(OPENOCD_TARGET "target/stm32f1x.cfg" CACHE STRING
+    "OpenOCD target configuration")
+set(OPENOCD_ADAPTER_SPEED "1000" CACHE STRING
+    "SWD clock in kHz")
+find_program(OPENOCD_EXECUTABLE NAMES openocd)
+
+if(OPENOCD_EXECUTABLE)
+    add_custom_target(flash
+        COMMAND ${OPENOCD_EXECUTABLE}
+                -f ${OPENOCD_INTERFACE}
+                -c "transport select swd"
+                -f ${OPENOCD_TARGET}
+                -c "adapter speed ${OPENOCD_ADAPTER_SPEED}"
+                -c "program \"$<TARGET_FILE:${CMAKE_PROJECT_NAME}>\" verify reset exit"
+        DEPENDS ${CMAKE_PROJECT_NAME}
+        COMMENT "Flashing ${CMAKE_PROJECT_NAME}.elf through DAPLink/CMSIS-DAP"
+        USES_TERMINAL
+        VERBATIM
+    )
+else()
+    message(STATUS "OpenOCD not found: the flash target will not be generated")
+endif()
