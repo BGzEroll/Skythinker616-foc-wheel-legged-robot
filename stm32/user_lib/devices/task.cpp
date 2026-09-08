@@ -2,16 +2,19 @@
 
 namespace task
 {
-    static task_node *head = nullptr, *tail = nullptr;		// 定义头尾链表指针与当前链表指针
-
-    /**
-     * @brief 获取系统运行时间（毫秒）
-     * 
-     * @return uint32_t 系统运行时间（毫秒）
-     */
-    static uint32_t get_ms_tick()
+    namespace
     {
-        return HAL_GetTick();
+        task_node *head = nullptr, *tail = nullptr;		// 定义头尾链表指针与当前链表指针
+
+        /**
+         * @brief 获取系统运行时间（毫秒）
+         * 
+         * @return uint32_t 系统运行时间（毫秒）
+         */
+        uint32_t get_ms_tick()
+        {
+            return HAL_GetTick();
+        }
     }
 
     /**
