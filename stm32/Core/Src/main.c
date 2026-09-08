@@ -24,6 +24,9 @@
 #include "tim.h"
 #include "gpio.h"
 
+extern int app_ready(void);
+extern void app_loop(void);
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -96,13 +99,14 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
-
+  (void)app_ready();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    app_loop();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
