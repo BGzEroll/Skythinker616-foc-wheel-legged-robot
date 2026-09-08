@@ -5,7 +5,7 @@
 
 struct encoder_package
 {
-    uint32_t timestamp = 0;
+    uint32_t timestamp_ms = 0;
     uint32_t sequence = 0;
 
     float angle = 0.0f;
@@ -16,7 +16,7 @@ struct encoder_package
 namespace as5600
 {
     bool init();
-    encoder_package read(encoder_package &package);
+    bool update(encoder_package &package);
 }
 
 #endif

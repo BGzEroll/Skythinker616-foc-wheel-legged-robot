@@ -2,6 +2,7 @@
 
 #include "drivers/leds.h"
 #include "main.h"
+#include "devices/hw/encoder.h"
 
 static leds normal_led(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
 
@@ -31,4 +32,19 @@ void normal_led_blink(uint32_t tick, void *arg)
             }
             break;
     }
+}
+
+void encoder_test(uint32_t tick, void *arg)
+{
+    static encoder_package package;
+
+    if(as5600::update(package))
+    {
+        // 处理编码器数据包
+    }
+}
+
+void test_init()
+{
+    as5600::init();
 }
