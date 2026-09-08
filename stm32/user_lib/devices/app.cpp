@@ -8,6 +8,9 @@ void task_list()
 
     static task_node test_task_encoder;
     task::create(&test_task_encoder, encoder_test, 1, nullptr);
+
+    static task_node test_task_can_comm;
+    task::create(&test_task_can_comm, can_comm_test, 10, nullptr);
 }
 
 /**

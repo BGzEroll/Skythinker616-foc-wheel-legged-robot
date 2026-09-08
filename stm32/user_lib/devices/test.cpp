@@ -3,6 +3,7 @@
 #include "drivers/leds.h"
 #include "main.h"
 #include "devices/hw/encoder.h"
+#include "devices/io/can_comm.h"
 
 static leds normal_led(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
 
@@ -44,7 +45,13 @@ void encoder_test(uint32_t tick, void *arg)
     }
 }
 
+void can_comm_test(uint32_t tick, void *arg)
+{
+    can_comm_proc();
+}
+
 void test_init()
 {
     as5600::init();
+    can_comm_init();
 }
