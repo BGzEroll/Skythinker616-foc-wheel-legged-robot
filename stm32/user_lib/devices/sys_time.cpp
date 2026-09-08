@@ -18,7 +18,8 @@ namespace sys_time
 
             if(HAL_TIM_Base_Start(&htim1) != HAL_OK)
             {
-                Error_Handler();
+                __disable_irq();
+                while(true);
             }
 
             initialized = true;

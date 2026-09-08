@@ -24,7 +24,7 @@
 #include "tim.h"
 #include "gpio.h"
 
-extern void app_ready(void);
+extern void app_init(void);
 extern void app_loop(void);
 
 /* Private includes ----------------------------------------------------------*/
@@ -99,7 +99,7 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
-  app_ready();
+  app_init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
