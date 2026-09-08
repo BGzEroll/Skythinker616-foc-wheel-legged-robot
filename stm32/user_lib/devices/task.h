@@ -3,25 +3,24 @@
 
 #include "stm32f1xx_hal.h"
 
-#define get_ms_tick       HAL_GetTick		// 不同平台修改成对应的获取毫秒的函数
-
 struct task_node
 {
     uint32_t last_time = 0;
-    uint32_t loop_time = 0;
+    uint32_t period_ms = 0;
 
     void (*callback)(uint32_t, void *) = nullptr;
     void *arg = nullptr;
 
     task_node *p_next = nullptr;
+    bool registered = false;
 };
 
 namespace task
 {
     bool create(
-        task_node *new_task,
+        task_node *task,
         void (*callback)(uint32_t, void *),
-        uint32_t loop_time,
+        uint32_t period_ms,
         void *arg = nullptr);
 
     void loop();

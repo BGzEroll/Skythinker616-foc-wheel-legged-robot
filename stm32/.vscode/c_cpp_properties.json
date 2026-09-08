@@ -1,0 +1,27 @@
+{
+    "configurations": [
+        {
+            "name": "STM32F103C6T6",
+            "compilerPath": "/usr/bin/arm-none-eabi-gcc",
+            "compileCommands": "${workspaceFolder}/build/Debug/compile_commands.json",
+            "cStandard": "gnu11",
+            "cppStandard": "gnu++17",
+            "intelliSenseMode": "gcc-arm",
+            "defines": [
+                "USE_HAL_DRIVER",
+                "STM32F103x6",
+                "DEBUG"
+            ],
+            "includePath": [
+                "${workspaceFolder}/Core/Inc",
+                "${workspaceFolder}/user_lib",
+                "${workspaceFolder}/user_lib/devices",
+                "${workspaceFolder}/Drivers/STM32F1xx_HAL_Driver/Inc",
+                "${workspaceFolder}/Drivers/STM32F1xx_HAL_Driver/Inc/Legacy",
+                "${workspaceFolder}/Drivers/CMSIS/Device/ST/STM32F1xx/Include",
+                "${workspaceFolder}/Drivers/CMSIS/Include"
+            ]
+        }
+    ],
+    "version": 4
+}
