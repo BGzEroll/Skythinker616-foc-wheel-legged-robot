@@ -3,6 +3,9 @@
 #include "devices/io/can_comm.h"
 #include "test.h"
 
+/**
+ * @brief 任务列表
+ */
 void task_list()
 {
     static task_node led_task;
