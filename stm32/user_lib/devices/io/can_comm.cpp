@@ -1,56 +1,382 @@
 #include "can_comm.h"
 
-#include "devices/hw/encoder.h"
+#include "stm32f1xx_hal.h"
+#include "can.h"
+#include <string.h>
 
-static can_bus can0(0);
-
-/**
- * @brief can0 接收数据回调函数
- * 
- * @param id 数据 ID
- * @param data 数据指针
- */
-static void can0_receive_cb(uint32_t id, uint8_t *data)
+namespace can_comm
 {
-    if(id == 0x123)
+    namespace
     {
-        ;
+        CAN_HandleTypeDef &handle = ::hcan;
+
+        /**
+         * @brief ESP32 广播设备发现
+         *
+         * Standard CAN
+         * ID  = 0x700
+         * DLC = 0
+         */
+        constexpr uint16_t discover_id = 0x700;
+        
+        /**
+         * @brief Extended CAN ID 布局
+         *
+         * bit 28~26 : 消息类型
+         * bit 25~0  : device_id
+         *
+         * 000 : command
+         * 001 : feedback
+         * 010 : discovery response
+         */
+        constexpr uint32_t device_id_mask = 0x03FFFFFF;
+        constexpr uint32_t command_base  = 0x00000000;
+        constexpr uint32_t feedback_base = 0x04000000;
+        constexpr uint32_t response_base = 0x08000000;
+
+        // STM32F103 96-bit Unique Device ID 起始地址
+        constexpr uintptr_t uid_address = 0x1FFFF7E8UL;
+
+        uint32_t device_id = 0;
+
+        uint32_t command_id = 0;
+        uint32_t feedback_id = 0;
+        uint32_t response_id = 0;
+
+        target_package latest_package;
+        uint32_t sequence = 0;
+    }
+
+    namespace
+    {
+        /**
+         * @brief 根据 STM32 96-bit UID 生成固定 device_id
+         *
+         * 使用 FNV-1a Hash，
+         * 最终截取为 26 bit。
+         */
+        uint32_t make_device_id()
+        {
+            const volatile uint8_t *uid =
+                reinterpret_cast<const volatile uint8_t *>(uid_address);
+
+            uint32_t hash = 2166136261u;
+
+            for(uint8_t i = 0; i < 12; ++i)
+            {
+                hash ^= uid[i];
+                hash *= 16777619u;
+            }
+
+            uint32_t id = hash & device_id_mask;
+
+            // 0 保留，不作为有效 device_id
+            if(id == 0){id = 1;}
+
+            return id;
+        }
+
+        /**
+         * @brief 配置精确 CAN ID 过滤器
+         *
+         * @param bank Filter Bank
+         * @param id CAN ID
+         * @param extended true = Extended CAN
+         *
+         * @return true 配置成功
+         * @return false 配置失败
+         */
+        bool config_exact_filter(uint8_t bank, uint32_t id, bool extended)
+        {
+            uint32_t filter_id;
+            uint32_t filter_mask;
+
+            if(extended)
+            {
+                /**
+                 * bxCAN 32-bit Extended filter:
+                 *
+                 * bit31~3 = 29-bit Extended ID
+                 * bit2    = IDE
+                 * bit1    = RTR
+                 */
+                filter_id =
+                    ((id & 0x1FFFFFFFu) << 3) |
+                    (1u << 2);
+
+                filter_mask =
+                    (0x1FFFFFFFu << 3) |
+                    (1u << 2) |
+                    (1u << 1);
+            }
+            else
+            {
+                /**
+                 * bxCAN 32-bit Standard filter:
+                 *
+                 * bit31~21 = 11-bit Standard ID
+                 * bit2     = IDE
+                 * bit1     = RTR
+                 */
+                filter_id =
+                    (id & 0x7FFu) << 21;
+
+                filter_mask =
+                    (0x7FFu << 21) |
+                    (1u << 2) |
+                    (1u << 1);
+            }
+
+
+            CAN_FilterTypeDef filter = {};
+
+            filter.FilterBank = bank;
+            filter.FilterMode = CAN_FILTERMODE_IDMASK;
+            filter.FilterScale = CAN_FILTERSCALE_32BIT;
+            filter.FilterIdHigh = (uint16_t)(filter_id >> 16);
+            filter.FilterIdLow = (uint16_t)(filter_id & 0xFFFF);
+            filter.FilterMaskIdHigh = (uint16_t)(filter_mask >> 16);
+            filter.FilterMaskIdLow = (uint16_t)(filter_mask & 0xFFFF);
+            filter.FilterFIFOAssignment = CAN_RX_FIFO0;
+            filter.FilterActivation = ENABLE;
+
+            return HAL_CAN_ConfigFilter(&handle, &filter) == HAL_OK;
+        }
+
+        /**
+         * @brief 发送 CAN 数据帧
+         */
+        bool send_frame(uint32_t id, bool extended, const uint8_t *data, uint8_t size)
+        {
+            if(size > 8)
+            {
+                return false;
+            }
+
+            if(HAL_CAN_GetTxMailboxesFreeLevel(&handle) == 0)
+            {
+                return false;
+            }
+
+            CAN_TxHeaderTypeDef header = {};
+
+            if(extended)
+            {
+                header.ExtId = id & 0x1FFFFFFFu;
+                header.IDE = CAN_ID_EXT;
+            }
+            else
+            {
+                header.StdId = id & 0x7FFu;
+                header.IDE = CAN_ID_STD;
+            }
+
+            header.RTR = CAN_RTR_DATA;
+            header.DLC = size;
+            header.TransmitGlobalTime = DISABLE;
+
+            uint32_t mailbox;
+
+            return HAL_CAN_AddTxMessage(&handle, &header, (const uint8_t *)data, &mailbox) == HAL_OK;
+        }
+
+        /**
+         * @brief 回复设备发现
+         *
+         * Extended CAN ID:
+         *
+         * response_base | device_id
+         *
+         * CAN ID 本身已经包含设备身份，
+         * 因此无需 payload。
+         */
+        bool send_device_response()
+        {
+            uint8_t dummy = 0;
+
+            return send_frame(
+                response_id,
+                true,
+                &dummy,
+                0
+            );
+        }
+
+        /**
+         * @brief 处理收到的目标电压
+         */
+        void receive_target(const CAN_RxHeaderTypeDef &header, const uint8_t *data)
+        {
+            if(header.IDE != CAN_ID_EXT ||
+               header.RTR != CAN_RTR_DATA ||
+               header.ExtId != command_id ||
+               header.DLC != sizeof(float))
+            {
+                return;
+            }
+
+            float voltage;
+            memcpy(&voltage, data, sizeof(voltage));
+
+
+            /**
+             * CAN RX callback 本身运行于中断中。
+             *
+             * 因此在这里完整生成最新 target_package。
+             */
+            target_package new_package;
+
+            new_package.timestamp_ms = HAL_GetTick();
+            new_package.sequence = ++sequence;
+            new_package.voltage = voltage;
+
+            latest_package = new_package;
+        }
+        
+        /**
+         * @brief CAN FIFO0 接收处理
+         */
+        void receive()
+        {
+            CAN_RxHeaderTypeDef header;
+            uint8_t data[8];
+
+            if(HAL_CAN_GetRxMessage(&handle, CAN_RX_FIFO0, &header, data) != HAL_OK)
+            {
+                return;
+            }
+
+            // Device discovery
+            if(header.IDE == CAN_ID_STD &&
+               header.RTR == CAN_RTR_DATA &&
+               header.StdId == discover_id &&
+               header.DLC == 0)
+            {
+                send_device_response();
+                return;
+            }
+
+            // Target voltage
+            if(header.IDE == CAN_ID_EXT &&
+               header.ExtId == command_id)
+            {
+                receive_target(header, data);
+                return;
+            }
+        }
+    }
+
+    /**
+     * @brief 初始化 CAN 通信
+     *
+     * @return true 初始化成功
+     * @return false 初始化失败
+     */
+    bool init()
+    {
+        // STM 上电立即读取自己的 UID，生成固定 device_id
+        device_id = make_device_id();
+        command_id = command_base | device_id;
+        feedback_id = feedback_base | device_id;
+        response_id = response_base | device_id;
+
+        latest_package = {};
+        sequence = 0;
+
+        /**
+         * Filter Bank 0
+         *
+         * 广播设备发现：
+         *
+         * STD 0x700
+         */
+        if(!config_exact_filter(0, discover_id, false))
+        {
+            return false;
+        }
+
+        /**
+         * Filter Bank 1
+         *
+         * 只接收发送给自己的控制帧：
+         *
+         * EXT command_id
+         */
+        if(!config_exact_filter(1,command_id, true))
+        {
+            return false;
+        }
+
+        if(HAL_CAN_Start(&handle) != HAL_OK)
+        {
+            return false;
+        }
+
+        if(HAL_CAN_ActivateNotification(&handle, CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @brief 获取最新的目标电压数据包
+     *
+     * @param snapshot 输出参数，返回最新数据包
+     *
+     * @return true 成功获取到数据包
+     * @return false 尚未接收到任何数据包
+     */
+    bool get_package(target_package &snapshot)
+    {
+        const uint32_t primask = __get_PRIMASK();
+        __disable_irq();
+        if(latest_package.sequence == 0)
+        {
+            __set_PRIMASK(primask);
+            return false;
+        }
+
+        snapshot = latest_package;
+        __set_PRIMASK(primask);
+
+        return true;
+    }
+
+    /**
+     * @brief 发送编码器数据反馈
+     *
+     * @param package 编码器数据包
+     *
+     * @return true 发送成功
+     * @return false 发送失败
+     */
+    bool send_feedback(const encoder_package &package)
+    {
+        uint8_t data[8];
+
+        memcpy(&data[0], &package.full_angle, sizeof(float));
+        memcpy(&data[4], &package.speed, sizeof(float));
+
+        return send_frame(
+            feedback_id,
+            true,
+            data,
+            sizeof(data)
+        );
     }
 }
 
 /**
- * @brief can0 发送数据
+ * @brief CAN RX FIFO0 消息接收中断回调
+ *
+ * @param hcan CAN 句柄
  */
-static void can0_send()
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
-    encoder_package package;
-
-    if(!as5600::get_package(package))
+    if(hcan == &can_comm::handle)
     {
-        return;
+        can_comm::receive();
     }
-
-    uint8_t tx_buf[8];
-
-    memcpy(&tx_buf[0], &package.full_angle, sizeof(float));
-    memcpy(&tx_buf[4], &package.speed, sizeof(float));
-
-    can0.send(0x100, tx_buf, sizeof(tx_buf));
-}
-
-/**
- * @brief can 初始化
- */
-void can_comm_init()
-{
-    can0.init();
-    can0.register_receive_callback(can0_receive_cb);
-}
-
-/**
- * @brief can 处理数据进程函数
- */
-void can_comm_proc()
-{
-    can0_send();
 }

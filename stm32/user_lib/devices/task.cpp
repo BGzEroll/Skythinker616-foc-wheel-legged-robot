@@ -7,7 +7,10 @@ namespace task
     namespace
     {
         task_node *head = nullptr, *tail = nullptr;		// 定义头尾链表指针与当前链表指针
+    }
 
+    namespace
+    {
         /**
          * @brief 获取系统运行时间（毫秒）
          * 

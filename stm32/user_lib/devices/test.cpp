@@ -35,23 +35,14 @@ void normal_led_blink(uint32_t tick)
     }
 }
 
-void encoder_test(uint32_t tick, void *arg)
-{
-    static encoder_package package;
-
-    if(as5600::update())
-    {
-        // 处理编码器数据包
-        as5600::get_package(package);
-    }
-}
-
 void can_comm_test()
 {
-    can_comm_proc();
+    static encoder_package package;
+    as5600::get_package(package);
+    can_comm::send_feedback(package);
 }
 
 void test_init()
 {
-    can_comm_init();
+    // can_comm_init();
 }

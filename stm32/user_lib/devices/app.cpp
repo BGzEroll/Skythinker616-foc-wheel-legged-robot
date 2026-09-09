@@ -1,5 +1,6 @@
 #include "task.h"
 #include "devices/hw/encoder.h"
+#include "devices/io/can_comm.h"
 #include "test.h"
 
 void task_list()
@@ -24,6 +25,7 @@ extern "C" void app_init(void)
 {
     test_init();
     as5600::init();
+    can_comm::init();
 
     task_list();
 }
