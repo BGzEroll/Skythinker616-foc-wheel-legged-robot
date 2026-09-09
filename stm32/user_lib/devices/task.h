@@ -8,7 +8,10 @@ struct task_node
     uint32_t last_time = 0;
     uint32_t period_ms = 0;
 
-    void (*callback)(uint32_t, void *) = nullptr;
+    void (*callback)() = nullptr;
+    void (*callback_tick)(uint32_t) = nullptr;
+    void (*callback_arg)(void *) = nullptr;
+
     void *arg = nullptr;
 
     task_node *p_next = nullptr;
@@ -19,9 +22,19 @@ namespace task
 {
     bool create(
         task_node *task,
-        void (*callback)(uint32_t, void *),
+        void (*callback)(),
+        uint32_t period_ms);
+
+    bool create(
+        task_node *task,
+        void (*callback)(uint32_t),
+        uint32_t period_ms);
+
+    bool create(
+        task_node *task,
+        void (*callback)(void *),
         uint32_t period_ms,
-        void *arg = nullptr);
+        void *arg);
 
     void loop();
 }

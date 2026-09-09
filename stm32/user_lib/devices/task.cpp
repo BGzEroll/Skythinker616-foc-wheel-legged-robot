@@ -17,40 +17,100 @@ namespace task
         {
             return HAL_GetTick();
         }
+
+        /**
+         * @brief 将任务节点添加到链表末尾
+         * 
+         * @param task 任务节点指针
+         */
+        void append(task_node *task)
+        {
+            task->p_next = nullptr;
+
+            if(tail)
+            {
+                tail->p_next = task;
+            }
+            else
+            {
+                head = task;
+            }
+
+            tail = task;
+            task->registered = true;
+        }
     }
 
     /**
-     * @brief 创建调度器任务
+     * @brief 创建一个定时任务
      * 
      * @param task 任务节点指针
      * @param callback 回调函数指针
-     * @param period_ms 任务周期（毫秒）
+     * @param period_ms 定时周期（毫秒）
+     * 
+     * @return true 创建成功
+     * @return false 创建失败
+     */
+    bool create(task_node *task, void (*callback)(), uint32_t period_ms)
+    {
+        if(!task || !callback || period_ms == 0 || task->registered)
+            return false;
+
+        task->last_time = get_ms_tick();
+        task->period_ms = period_ms;
+        task->callback = callback;
+
+        append(task);
+
+        return true;
+    }
+
+    /**
+     * @brief 创建一个定时任务
+     * 
+     * @param task 任务节点指针
+     * @param callback 回调函数指针
+     * @param period_ms 定时周期（毫秒）
+     * 
+     * @return true 创建成功
+     * @return false 创建失败
+     */
+    bool create(task_node *task, void (*callback)(uint32_t), uint32_t period_ms)
+    {
+        if(!task || !callback || period_ms == 0 || task->registered)
+            return false;
+
+        task->last_time = get_ms_tick();
+        task->period_ms = period_ms;
+        task->callback_tick = callback;
+
+        append(task);
+
+        return true;
+    }
+
+    /**
+     * @brief 创建一个定时任务
+     * 
+     * @param task 任务节点指针
+     * @param callback 回调函数指针
+     * @param period_ms 定时周期（毫秒）
      * @param arg 回调函数参数指针
      * 
      * @return true 创建成功
      * @return false 创建失败
      */
-    bool create(task_node *task, void (*callback)(uint32_t, void *), uint32_t period_ms, void *arg)
+    bool create(task_node *task, void (*callback)(void *), uint32_t period_ms, void *arg)
     {
-        if(!task || !callback || period_ms == 0 || task->registered){return false;}
+        if(!task || !callback || period_ms == 0 || task->registered)
+            return false;
 
         task->last_time = get_ms_tick();
         task->period_ms = period_ms;
-        task->callback = callback;
+        task->callback_arg = callback;
         task->arg = arg;
-        task->p_next = nullptr;
 
-        if(tail)
-        {
-            tail->p_next = task;
-        }
-        else
-        {
-            head = task;
-        }
-        tail = task;
-
-        task->registered = true;
+        append(task);
 
         return true;
     }
@@ -67,8 +127,10 @@ namespace task
             if(now - current->last_time >= current->period_ms)
             {
                 current->last_time += current->period_ms;
-                
-                current->callback(current->period_ms, current->arg);
+
+                if(current->callback){current->callback();}
+                else if(current->callback_tick){current->callback_tick(current->period_ms);}
+                else if(current->callback_arg){current->callback_arg(current->arg);}
             }
             current = current->p_next;
         }

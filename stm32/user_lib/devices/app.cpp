@@ -10,7 +10,7 @@ void task_list()
     static task_node encoder_task;
     task::create(
         &encoder_task,
-        [](uint32_t tick, void *arg){as5600::update();},
+        [](){as5600::update();},
         1);
 
     static task_node can_comm_test_task;

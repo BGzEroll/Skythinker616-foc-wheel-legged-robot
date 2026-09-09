@@ -7,7 +7,7 @@
 
 static leds normal_led(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
 
-void normal_led_blink(uint32_t tick, void *arg)
+void normal_led_blink(uint32_t tick)
 {
     static uint8_t step = 0;
     static uint32_t step_tick = 0;
@@ -46,7 +46,7 @@ void encoder_test(uint32_t tick, void *arg)
     }
 }
 
-void can_comm_test(uint32_t tick, void *arg)
+void can_comm_test()
 {
     can_comm_proc();
 }
