@@ -153,11 +153,6 @@ namespace can_comm
                 return false;
             }
 
-            if(HAL_CAN_GetTxMailboxesFreeLevel(&handle) == 0)
-            {
-                return false;
-            }
-
             CAN_TxHeaderTypeDef header = {};
 
             if(extended)
@@ -177,7 +172,12 @@ namespace can_comm
 
             uint32_t mailbox;
 
-            return HAL_CAN_AddTxMessage(&handle, &header, (const uint8_t *)data, &mailbox) == HAL_OK;
+            const uint32_t primask = __get_PRIMASK();
+            __disable_irq();
+            const HAL_StatusTypeDef status = HAL_CAN_AddTxMessage(&handle, &header, data, &mailbox);
+            __set_PRIMASK(primask);
+
+            return status == HAL_OK;
         }
 
         /**
@@ -218,19 +218,15 @@ namespace can_comm
             float voltage;
             memcpy(&voltage, data, sizeof(voltage));
 
-
-            /**
-             * CAN RX callback 本身运行于中断中。
-             *
-             * 因此在这里完整生成最新 target_package。
-             */
             target_package new_package;
-
             new_package.timestamp_ms = HAL_GetTick();
             new_package.sequence = ++sequence;
             new_package.voltage = voltage;
 
+            const uint32_t primask = __get_PRIMASK();
+            __disable_irq();
             latest_package = new_package;
+            __set_PRIMASK(primask);
         }
         
         /**
