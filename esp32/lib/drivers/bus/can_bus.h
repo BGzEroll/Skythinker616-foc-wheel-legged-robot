@@ -10,7 +10,7 @@ class can_bus {
 
     public:
         void init();
-        void receive(void (*receive_cb)(uint32_t id, uint8_t *data));
+        void receive(void (*receive_cb)(uint32_t id, const uint8_t *data, uint8_t len));
         void send(uint32_t id, const uint8_t *data, uint8_t len);
 
     private:

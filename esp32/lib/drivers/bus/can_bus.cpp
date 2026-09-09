@@ -23,28 +23,31 @@ class can_dev {
 
             twai_timing_config_t twai_timing_config = TWAI_TIMING_CONFIG_1MBITS();
 
-            twai_filter_config_t twai_filter_config = {
-                .acceptance_code = 0x00000000,
-                .acceptance_mask = 0xFFFFFFFF,
-                .single_filter = true
-            };
+            twai_filter_config_t twai_filter_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
 
-            twai_driver_install(&twai_config, &twai_timing_config, &twai_filter_config);
-            twai_start();
-            is_init = true;
+            if(twai_driver_install(&twai_config, &twai_timing_config, &twai_filter_config) != ESP_OK)
+            {
+                return;
+            }
+
+            is_init = twai_start() == ESP_OK;
         }
 
-        void receive(void (*receive_cb)(uint32_t id, uint8_t *data))
+        void receive(void (*receive_cb)(uint32_t id, const uint8_t *data, uint8_t len))
         {
-            twai_status_info_t status;
-            twai_get_status_info(&status);
-
-            twai_message_t msg;
-            for(uint8_t i = 0; i < status.msgs_to_rx; i++)
+            if(!is_init || !receive_cb)
             {
-                if(twai_receive(&msg, 0) == ESP_OK)
+                return;
+            }
+
+            twai_message_t msg = {};
+            while(twai_receive(&msg, 0) == ESP_OK)
+            {
+                // Remote frames do not contain a payload. Forward valid CAN
+                // data frames with their ID and actual payload length.
+                if(!msg.rtr && msg.data_length_code <= TWAI_FRAME_MAX_DLC)
                 {
-                    receive_cb(msg.identifier, msg.data);
+                    receive_cb(msg.identifier, msg.data, msg.data_length_code);
                 }
             }
         }
@@ -107,9 +110,9 @@ void can_bus::init()
 /**
  * @brief can 总线接收函数
  * 
- * @param receive_cb 接收回调函数指针，参数为 can 消息 ID 和数据指针
+ * @param receive_cb 接收回调函数指针，参数为 CAN ID、数据指针和实际长度
  */
-void can_bus::receive(void (*receive_cb)(uint32_t id, uint8_t *data))
+void can_bus::receive(void (*receive_cb)(uint32_t id, const uint8_t *data, uint8_t len))
 {
     get_dev(bus_id)->receive(receive_cb);
 }

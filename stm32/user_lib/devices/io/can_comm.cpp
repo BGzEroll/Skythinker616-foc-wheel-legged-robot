@@ -1,5 +1,7 @@
 #include "can_comm.h"
 
+#include "devices/hw/encoder.h"
+
 static can_bus can0(0);
 
 /**
@@ -21,17 +23,19 @@ static void can0_receive_cb(uint32_t id, uint8_t *data)
  */
 static void can0_send()
 {
-    // uint8_t tx_buf[8];
-    // uint8_t idx = 0;
+    encoder_package package;
 
-    // float angle = motor_1.sensor->get_angle();
-    // float velocity = motor_1.sensor->get_velocity();
+    if(!as5600::get_package(package))
+    {
+        return;
+    }
 
-    // memcpy(tx_buf, &angle, sizeof(angle));
-    // idx += sizeof(angle);
-    // memcpy(&tx_buf[idx], &velocity, sizeof(velocity));
-    // idx += sizeof(velocity);
-    // can0.send(0x100, tx_buf, idx);
+    uint8_t tx_buf[8];
+
+    memcpy(&tx_buf[0], &package.full_angle, sizeof(float));
+    memcpy(&tx_buf[4], &package.speed, sizeof(float));
+
+    can0.send(0x100, tx_buf, sizeof(tx_buf));
 }
 
 /**
