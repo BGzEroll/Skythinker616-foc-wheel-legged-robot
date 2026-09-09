@@ -14,7 +14,7 @@ void task_list()
         1);
 
     static task_node can_comm_test_task;
-    task::create(&can_comm_test_task, can_comm_test, 10);
+    task::create(&can_comm_test_task, can_comm_test, 2);
 }
 
 /**
