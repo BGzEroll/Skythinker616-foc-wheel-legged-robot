@@ -3,17 +3,18 @@
 set -eu
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-    echo "Usage: $0 [serial_port] [baudrate] [display_interval_seconds]"
-    echo "Defaults: /dev/ttyUSB0 921600 0.1"
+    echo "Usage: $0 [serial_port] [baudrate]"
+    echo "Defaults: /dev/ttyUSB0 921600"
     echo ""
     echo "Parses: A5 5A | CAN ID (little-endian) | DLC | payload | XOR checksum"
-    echo "CAN ID 0x100 with 8 data bytes is decoded as full_angle and speed."
+    echo "Every valid CAN UART frame is displayed immediately."
+    echo "Extended feedback IDs (0x04000000 | device_id) with 8 data bytes are decoded as full_angle and speed."
+    echo "Legacy standard ID 0x100 with 8 data bytes is also supported."
     exit 0
 fi
 
 serial_port=${1:-/dev/ttyUSB0}
 baudrate=${2:-921600}
-display_interval=${3:-0.1}
 
 # Prefer the Python environment installed with PlatformIO because it normally
 # already contains pyserial. Fall back to the system Python when available.
@@ -34,7 +35,7 @@ if ! "$python_bin" -c 'import serial' 2>/dev/null; then
     exit 1
 fi
 
-exec "$python_bin" - "$serial_port" "$baudrate" "$display_interval" <<'PY'
+exec "$python_bin" - "$serial_port" "$baudrate" <<'PY'
 import datetime
 import struct
 import sys
@@ -46,6 +47,9 @@ import serial
 SOF = b"\xA5\x5A"
 MAX_DLC = 8
 HEADER_SIZE = 2 + 4 + 1
+FEEDBACK_ID_BASE = 0x04000000
+FEEDBACK_ID_TYPE_MASK = 0x1C000000
+DEVICE_ID_MASK = 0x03FFFFFF
 
 
 def extract_frames(buffer):
@@ -95,10 +99,20 @@ def extract_frames(buffer):
 
 def format_frame(can_id, data):
     raw = data.hex(" ")
-    if can_id == 0x100 and len(data) == 8:
+    is_feedback = (
+        (can_id & FEEDBACK_ID_TYPE_MASK) == FEEDBACK_ID_BASE
+        and len(data) == 8
+    )
+    is_legacy_feedback = can_id == 0x100 and len(data) == 8
+    if is_feedback or is_legacy_feedback:
         full_angle, speed = struct.unpack("<ff", data)
+        if is_feedback:
+            feedback_label = f"feedback device_id=0x{can_id & DEVICE_ID_MASK:06X}"
+        else:
+            feedback_label = "legacy_feedback"
         return (
-            f"id=0x{can_id:08X} full_angle={full_angle: .6f} "
+            f"id=0x{can_id:08X} {feedback_label} "
+            f"full_angle={full_angle: .6f} "
             f"speed={speed: .6f} raw={raw}"
         )
     return f"id=0x{can_id:08X} dlc={len(data)} data={raw}"
@@ -106,9 +120,6 @@ def format_frame(can_id, data):
 
 port = sys.argv[1]
 baud = int(sys.argv[2])
-interval = float(sys.argv[3])
-if interval <= 0:
-    raise SystemExit("display interval must be greater than zero")
 
 try:
     # Set control lines before opening so the monitor does not intentionally
@@ -133,15 +144,14 @@ except (serial.SerialException, ValueError) as exc:
 
 
 print(
-    f"Listening on {port} at {baud} baud; displaying valid CAN frames "
-    f"every {interval:g}s. Ctrl+C to stop.",
+    f"Listening on {port} at {baud} baud; displaying every valid CAN frame "
+    "immediately. Ctrl+C to stop.",
     flush=True,
 )
 
 buffer = bytearray()
-latest_frames = {}
-next_display = time.monotonic() + interval
-next_waiting = time.monotonic() + 1.0
+last_frame_time = time.monotonic()
+next_waiting = last_frame_time + 1.0
 
 try:
     while True:
@@ -150,20 +160,14 @@ try:
         if chunk:
             buffer.extend(chunk)
             for can_id, data in extract_frames(buffer):
-                latest_frames[can_id] = data
+                stamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                print(f"[{stamp}] {format_frame(can_id, data)}", flush=True)
+                last_frame_time = time.monotonic()
 
         now = time.monotonic()
-        if now >= next_display:
-            if latest_frames:
-                stamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                for can_id in sorted(latest_frames):
-                    print(f"[{stamp}] {format_frame(can_id, latest_frames[can_id])}", flush=True)
-                latest_frames.clear()
-            elif now >= next_waiting:
-                print("[waiting] no valid CAN UART frame received", flush=True)
-                next_waiting = now + 1.0
-
-            next_display = now + interval
+        if now >= next_waiting and now - last_frame_time >= 1.0:
+            print("[waiting] no valid CAN UART frame received", flush=True)
+            next_waiting = now + 1.0
 except KeyboardInterrupt:
     print("\nStopped.", file=sys.stderr)
 finally:
