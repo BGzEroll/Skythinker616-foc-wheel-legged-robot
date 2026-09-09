@@ -1,7 +1,7 @@
 #ifndef CAN_BUS_H
 #define CAN_BUS_H
 
-#include "stm32f1xx_hal.h"
+#include <stdint.h>
 
 class can_bus {
     public:

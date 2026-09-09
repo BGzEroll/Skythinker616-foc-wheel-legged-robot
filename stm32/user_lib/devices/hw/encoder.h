@@ -1,7 +1,7 @@
 #ifndef ENCODER_H
 #define ENCODER_H
 
-#include "stm32f1xx_hal.h"
+#include <stdint.h>
 
 struct encoder_package
 {
@@ -16,7 +16,8 @@ struct encoder_package
 namespace as5600
 {
     bool init();
-    bool update(encoder_package &package);
+    bool update();
+    bool get_package(encoder_package &snapshot);
 }
 
 #endif

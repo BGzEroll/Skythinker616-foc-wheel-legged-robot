@@ -39,7 +39,7 @@ void encoder_test(uint32_t tick, void *arg)
 {
     static encoder_package package;
 
-    if(as5600::update(package))
+    if(as5600::update())
     {
         // 处理编码器数据包
     }

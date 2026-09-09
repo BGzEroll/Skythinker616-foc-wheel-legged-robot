@@ -1,5 +1,6 @@
 #include "sys_time.h"
 
+#include "stm32f1xx_hal.h"
 #include "tim.h"
 
 namespace sys_time

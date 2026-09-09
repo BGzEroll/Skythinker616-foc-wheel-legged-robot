@@ -1,7 +1,7 @@
 #ifndef SYS_TIME_H
 #define SYS_TIME_H
 
-#include "stm32f1xx_hal.h"
+#include <stdint.h>
 
 namespace sys_time
 {

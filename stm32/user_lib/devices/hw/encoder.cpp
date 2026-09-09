@@ -1,5 +1,6 @@
 #include "encoder.h"
 
+#include "stm32f1xx_hal.h"
 #include "i2c.h"
 #include "sys_time.h"
 
@@ -83,6 +84,8 @@ namespace
     }
 }
 
+static encoder_package latest_package;
+
 namespace as5600
 {
     namespace
@@ -123,10 +126,8 @@ namespace as5600
 
         /**
          * @brief 处理读取到的数据
-         * 
-         * @param package 编码器数据包
          */
-        void process_data(encoder_package &package)
+        void process_data()
         {
             const uint16_t raw = (((uint16_t)raw_data[0] & 0x0F) << 8) | raw_data[1];
             const uint16_t now_us = (uint16_t)i2c::dma_complete_time_us;
@@ -162,11 +163,19 @@ namespace as5600
                 last_time_us = now_us;
             }
 
-            package.timestamp_ms = sys_time::get_ms_tick();
-            package.sequence = ++sequence;
-            package.angle = (float)raw * count_to_rad;
-            package.full_angle = (float)full_count * count_to_rad;
-            package.speed = speed;
+            encoder_package new_package;
+
+            new_package.timestamp_ms = sys_time::get_ms_tick();
+            new_package.sequence = ++sequence;
+            new_package.angle = (float)raw * count_to_rad;
+            new_package.full_angle = (float)full_count * count_to_rad;
+            new_package.speed = speed;
+
+            // 使用临界区保护数据包更新，防止中断导致数据不一致
+            const uint32_t primask = __get_PRIMASK();
+            __disable_irq();
+            latest_package = new_package;
+            __set_PRIMASK(primask);
         }
     }
 
@@ -198,12 +207,10 @@ namespace as5600
     /**
      * @brief 更新编码器数据包
      * 
-     * @param package 编码器数据包引用
-     * 
      * @return true 数据包已更新（DMA 读取完成）
      * @return false 数据包未更新（DMA 正在忙碌或出错）
      */
-    bool update(encoder_package &package)
+    bool update()
     {
         if(!initialized)
         {
@@ -216,7 +223,7 @@ namespace as5600
                 return false;
 
             case i2c::dma_state::done:
-                process_data(package);
+                process_data();
                 i2c::clear_dma_state();
                 start_read();       // 立即开始下一次读取
                 return true;
@@ -232,6 +239,25 @@ namespace as5600
         }
 
         return false;
+    }
+
+    /**
+     * @brief 获取最新的编码器数据包
+     * 
+     * @param package 编码器数据包引用
+     * 
+     * @return true 成功获取数据包
+     * @return false 未能获取数据包（编码器未初始化）
+     */
+    bool get_package(encoder_package &snapshot)
+    {
+        if(!initialized || latest_package.sequence == 0)
+        {
+            return false;
+        }
+
+        snapshot = latest_package;
+        return true;
     }
 }
 

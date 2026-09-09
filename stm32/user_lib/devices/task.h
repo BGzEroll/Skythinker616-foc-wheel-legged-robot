@@ -1,7 +1,7 @@
 #ifndef TASK_H
 #define TASK_H
 
-#include "stm32f1xx_hal.h"
+#include <stdint.h>
 
 struct task_node
 {

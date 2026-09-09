@@ -1,5 +1,6 @@
 #include "can_bus.h"
 
+#include "stm32f1xx_hal.h"
 #include "can.h"
 
 class can_dev {
