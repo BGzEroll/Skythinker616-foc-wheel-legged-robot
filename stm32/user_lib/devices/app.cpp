@@ -1,16 +1,20 @@
 #include "task.h"
+#include "devices/hw/encoder.h"
 #include "test.h"
 
 void task_list()
 {
-    static task_node test_task_led;
-    task::create(&test_task_led, normal_led_blink, 50, nullptr);
+    static task_node led_task;
+    task::create(&led_task, normal_led_blink, 50);
 
-    static task_node test_task_encoder;
-    task::create(&test_task_encoder, encoder_test, 1, nullptr);
+    static task_node encoder_task;
+    task::create(
+        &encoder_task,
+        [](uint32_t tick, void *arg){as5600::update();},
+        1);
 
-    static task_node test_task_can_comm;
-    task::create(&test_task_can_comm, can_comm_test, 10, nullptr);
+    static task_node can_comm_test_task;
+    task::create(&can_comm_test_task, can_comm_test, 10);
 }
 
 /**
@@ -19,6 +23,7 @@ void task_list()
 extern "C" void app_init(void)
 {
     test_init();
+    as5600::init();
 
     task_list();
 }

@@ -42,6 +42,7 @@ void encoder_test(uint32_t tick, void *arg)
     if(as5600::update())
     {
         // 处理编码器数据包
+        as5600::get_package(package);
     }
 }
 
@@ -52,6 +53,5 @@ void can_comm_test(uint32_t tick, void *arg)
 
 void test_init()
 {
-    as5600::init();
     can_comm_init();
 }
