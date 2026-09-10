@@ -16,20 +16,23 @@ namespace motor
         constexpr float sqrt_three_half = 0.86602540378443864676f;
         constexpr float max_modulation = 0.57735026918962576451f;
 
-        // 当前电机硬件参数：2804，14 极，编码器方向为正。
+        // 当前电机硬件参数：2804，14 极；编码器方向在初始化时自动判断。
         constexpr uint8_t pole_pairs = 7;
-        constexpr float rotor_direction = 1.0f;
         constexpr float bus_voltage = 12.0f;
         constexpr float voltage_limit = 4.0f;
         constexpr float alignment_voltage = 0.4f;
         constexpr uint32_t alignment_duration_ms = 500;
         constexpr uint32_t encoder_wait_timeout_ms = 100;
+        constexpr uint16_t direction_steps = 100;
+        constexpr uint32_t direction_step_duration_ms = 2;
+        constexpr float direction_min_delta = two_pi / 100.0f;
         constexpr uint32_t target_timeout_ms = 100;
-        // TIM2 中心对齐下每个 PWM 周期产生两次更新事件：40 kHz / 4 = 10 kHz。
-        constexpr uint8_t control_update_divider = 4;
+        // TIM2 CH4 的 CCR4=800 比较事件只在向下计数时产生：20 kHz / 2 = 10 kHz。
+        constexpr uint8_t control_update_divider = 2;
 
         volatile bool initialized = false;
         volatile uint8_t update_count = 0;
+        float rotor_direction = 0.0f;
         float zero_electric_angle = 0.0f;
 
         /**
@@ -40,16 +43,6 @@ namespace motor
             while(angle >= two_pi){angle -= two_pi;}
             while(angle < 0.0f){angle += two_pi;}
             return angle;
-        }
-
-        float sine_approx(float angle)
-        {
-            const float angle_squared = angle * angle;
-            return angle * (1.0f + angle_squared *
-                (-0.1666666667f + angle_squared *
-                (0.0083333333f + angle_squared *
-                (-0.0001984127f + angle_squared *
-                (0.0000027557f - angle_squared * 0.0000000251f)))));
         }
 
         /**
@@ -64,8 +57,19 @@ namespace motor
 
             const uint8_t quadrant = (uint8_t)(angle / pi_2);
             const float offset = angle - (float)quadrant * pi_2;
-            const float sine_offset = sine_approx(offset);
-            const float cosine_offset = sine_approx(pi_2 - offset);
+            const float offset_squared = offset * offset;
+            const float sine_offset = offset * (1.0f + offset_squared *
+                (-0.1666666667f + offset_squared *
+                (0.0083333333f + offset_squared *
+                (-0.0001984127f + offset_squared *
+                (0.0000027557f - offset_squared * 0.0000000251f)))));
+            const float complement = pi_2 - offset;
+            const float complement_squared = complement * complement;
+            const float cosine_offset = complement * (1.0f +
+                complement_squared * (-0.1666666667f + complement_squared *
+                (0.0083333333f + complement_squared *
+                (-0.0001984127f + complement_squared *
+                (0.0000027557f - complement_squared * 0.0000000251f)))));
 
             switch(quadrant)
             {
@@ -89,33 +93,6 @@ namespace motor
                     cosine = sine_offset;
                     break;
             }
-        }
-
-        float limit_duty(float duty)
-        {
-            if(!(duty >= 0.0f)){return 0.0f;}
-            return duty > 1.0f ? 1.0f : duty;
-        }
-
-        uint32_t duty_to_compare(float duty)
-        {
-            const uint32_t period = __HAL_TIM_GET_AUTORELOAD(&htim2);
-            return (uint32_t)(limit_duty(duty) * (float)period + 0.5f);
-        }
-
-        /**
-         * @brief 向当前固定的 TIM2 三相输出写入占空比
-         *
-         * 逻辑 A/B/C 直接对应 TIM2 CH1/CH2/CH3（PA0/PA1/PA2）。
-         */
-        void write_duty(float phase_a, float phase_b, float phase_c)
-        {
-            __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1,
-                duty_to_compare(phase_a));
-            __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2,
-                duty_to_compare(phase_b));
-            __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3,
-                duty_to_compare(phase_c));
         }
 
         /**
@@ -159,7 +136,20 @@ namespace motor
             phase_b = (phase_b + center) / bus_voltage;
             phase_c = (phase_c + center) / bus_voltage;
 
-            write_duty(phase_a, phase_b, phase_c);
+            const uint32_t period = __HAL_TIM_GET_AUTORELOAD(&htim2);
+            if(!(phase_a >= 0.0f)){phase_a = 0.0f;}
+            else if(phase_a > 1.0f){phase_a = 1.0f;}
+            if(!(phase_b >= 0.0f)){phase_b = 0.0f;}
+            else if(phase_b > 1.0f){phase_b = 1.0f;}
+            if(!(phase_c >= 0.0f)){phase_c = 0.0f;}
+            else if(phase_c > 1.0f){phase_c = 1.0f;}
+
+            __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1,
+                (uint32_t)(phase_a * (float)period + 0.5f));
+            __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2,
+                (uint32_t)(phase_b * (float)period + 0.5f));
+            __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3,
+                (uint32_t)(phase_c * (float)period + 0.5f));
         }
 
         void enable_driver()
@@ -170,91 +160,6 @@ namespace motor
         void disable_driver()
         {
             HAL_GPIO_WritePin(DRV_EN_GPIO_Port, DRV_EN_Pin, GPIO_PIN_RESET);
-        }
-
-        void stop_pwm()
-        {
-            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_1);
-            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_2);
-            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_3);
-        }
-
-        bool start_pwm()
-        {
-            if(HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1) != HAL_OK)
-            {
-                return false;
-            }
-            if(HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2) != HAL_OK)
-            {
-                stop_pwm();
-                return false;
-            }
-            if(HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3) != HAL_OK)
-            {
-                stop_pwm();
-                return false;
-            }
-            return true;
-        }
-
-        bool read_encoder(encoder_package &package)
-        {
-            const uint32_t start = sys_time::get_ms_tick();
-
-            do
-            {
-                as5600::update();
-                if(as5600::get_package(package))
-                {
-                    return true;
-                }
-                sys_time::delay_ms(1);
-            }
-            while((uint32_t)(sys_time::get_ms_tick() - start) <
-                encoder_wait_timeout_ms);
-
-            return false;
-        }
-
-        void update_encoder(uint32_t duration_ms)
-        {
-            const uint32_t start = sys_time::get_ms_tick();
-
-            while((uint32_t)(sys_time::get_ms_tick() - start) < duration_ms)
-            {
-                as5600::update();
-                sys_time::delay_ms(1);
-            }
-        }
-
-        /**
-         * @brief 用固定方向电压矢量完成一次硬件专用编码器对齐
-         */
-        bool align_sensor()
-        {
-            encoder_package package;
-            if(!read_encoder(package))
-            {
-                return false;
-            }
-
-            set_phase_voltage(alignment_voltage, three_pi_2);
-            enable_driver();
-            update_encoder(alignment_duration_ms);
-
-            const bool package_valid = as5600::get_package(package);
-            set_phase_voltage(0.0f, 0.0f);
-            disable_driver();
-
-            if(!package_valid)
-            {
-                return false;
-            }
-
-            zero_electric_angle = normalize_angle(
-                rotor_direction * (float)pole_pairs * package.angle);
-            return true;
         }
 
         void loop()
@@ -297,49 +202,148 @@ namespace motor
 
         disable_driver();
         __HAL_TIM_DISABLE_IT(&htim2, TIM_IT_UPDATE);
+        __HAL_TIM_DISABLE_IT(&htim2, TIM_IT_CC4);
         __HAL_TIM_CLEAR_FLAG(&htim2, TIM_FLAG_UPDATE);
+        __HAL_TIM_CLEAR_FLAG(&htim2, TIM_FLAG_CC4);
 
-        if(!start_pwm())
+        if(HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1) != HAL_OK ||
+           HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2) != HAL_OK ||
+           HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3) != HAL_OK)
         {
+            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_1);
+            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_2);
+            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_3);
             return false;
         }
 
         set_phase_voltage(0.0f, 0.0f);
-        if(!align_sensor())
+
+        encoder_package package = {};
+        bool package_valid = false;
+        const uint32_t encoder_start = sys_time::get_ms_tick();
+        do
+        {
+            as5600::update();
+            if(as5600::get_package(package))
+            {
+                package_valid = true;
+                break;
+            }
+            sys_time::delay_ms(1);
+        }
+        while((uint32_t)(sys_time::get_ms_tick() - encoder_start) <
+            encoder_wait_timeout_ms);
+
+        if(!package_valid)
+        {
+            disable_driver();
+            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_1);
+            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_2);
+            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_3);
+            return false;
+        }
+
+        enable_driver();
+        const float direction_start = package.full_angle;
+        const float direction_step = two_pi / (float)direction_steps;
+        for(uint16_t step = 0; step <= direction_steps; ++step)
+        {
+            set_phase_voltage(
+                alignment_voltage,
+                three_pi_2 + direction_step * (float)step);
+            as5600::update();
+            sys_time::delay_ms(direction_step_duration_ms);
+        }
+
+        package_valid = as5600::get_package(package);
+        if(!package_valid)
         {
             set_phase_voltage(0.0f, 0.0f);
             disable_driver();
-            stop_pwm();
+            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_1);
+            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_2);
+            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_3);
+            return false;
+        }
+
+        const float direction_delta = package.full_angle - direction_start;
+        if(direction_delta > direction_min_delta)
+        {
+            rotor_direction = 1.0f;
+        }
+        else if(direction_delta < -direction_min_delta)
+        {
+            rotor_direction = -1.0f;
+        }
+        else
+        {
+            set_phase_voltage(0.0f, 0.0f);
+            disable_driver();
+            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_1);
+            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_2);
+            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_3);
             return false;
         }
 
         set_phase_voltage(0.0f, 0.0f);
+        disable_driver();
+
+        set_phase_voltage(alignment_voltage, three_pi_2);
+        enable_driver();
+        const uint32_t alignment_start = sys_time::get_ms_tick();
+        while((uint32_t)(sys_time::get_ms_tick() - alignment_start) <
+            alignment_duration_ms)
+        {
+            as5600::update();
+            sys_time::delay_ms(1);
+        }
+
+        package_valid = as5600::get_package(package);
+        set_phase_voltage(0.0f, 0.0f);
+        disable_driver();
+        if(!package_valid)
+        {
+            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_1);
+            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_2);
+            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_3);
+            return false;
+        }
+
+        zero_electric_angle = normalize_angle(
+            rotor_direction * (float)pole_pairs * package.angle);
+
         enable_driver();
         __HAL_TIM_CLEAR_FLAG(&htim2, TIM_FLAG_UPDATE);
+        __HAL_TIM_CLEAR_FLAG(&htim2, TIM_FLAG_CC4);
         update_count = 0;
         initialized = true;
-        __HAL_TIM_ENABLE_IT(&htim2, TIM_IT_UPDATE);
+        if(HAL_TIM_OC_Start_IT(&htim2, TIM_CHANNEL_4) != HAL_OK)
+        {
+            initialized = false;
+            disable_driver();
+            HAL_TIM_OC_Stop_IT(&htim2, TIM_CHANNEL_4);
+            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_1);
+            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_2);
+            HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_3);
+            return false;
+        }
 
         return true;
     }
 
-    static void on_timer_elapsed(TIM_HandleTypeDef *timer)
-    {
-        if(timer != &htim2)
-        {
-            return;
-        }
-
-        update_count++;
-        if(update_count >= control_update_divider)
-        {
-            update_count = 0;
-            loop();
-        }
-    }
 }
 
-extern "C" void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *timer)
+extern "C" void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *timer)
 {
-    motor::on_timer_elapsed(timer);
+    if(timer != &htim2 || timer->Channel != HAL_TIM_ACTIVE_CHANNEL_4)
+    {
+        return;
+    }
+
+    motor::update_count++;
+    if(motor::update_count >= motor::control_update_divider)
+    {
+        motor::update_count = 0;
+        motor::loop();
+    }
 }
