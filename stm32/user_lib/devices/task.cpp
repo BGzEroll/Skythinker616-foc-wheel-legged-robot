@@ -56,8 +56,10 @@ namespace task
      */
     bool create(task_node *task, void (*callback)(), uint32_t period_ms)
     {
-        if(!task || !callback || period_ms == 0 || task->registered)
+        if(!task || !callback || task->registered)
+        {
             return false;
+        }
 
         task->last_time = get_ms_tick();
         task->period_ms = period_ms;
@@ -80,8 +82,10 @@ namespace task
      */
     bool create(task_node *task, void (*callback)(uint32_t), uint32_t period_ms)
     {
-        if(!task || !callback || period_ms == 0 || task->registered)
+        if(!task || !callback || task->registered)
+        {
             return false;
+        }
 
         task->last_time = get_ms_tick();
         task->period_ms = period_ms;
@@ -105,8 +109,10 @@ namespace task
      */
     bool create(task_node *task, void (*callback)(void *), uint32_t period_ms, void *arg)
     {
-        if(!task || !callback || period_ms == 0 || task->registered)
+        if(!task || !callback || task->registered)
+        {
             return false;
+        }
 
         task->last_time = get_ms_tick();
         task->period_ms = period_ms;
@@ -124,10 +130,18 @@ namespace task
     void loop()
     {
         task_node *current = head;
+
         while(current)
         {
             uint32_t now = get_ms_tick();
-            if(now - current->last_time >= current->period_ms)
+
+            if(current->period_ms == 0)
+            {
+                if(current->callback){current->callback();}
+                else if(current->callback_tick){current->callback_tick(current->period_ms);}
+                else if(current->callback_arg){current->callback_arg(current->arg);}
+            }
+            else if(now - current->last_time >= current->period_ms)
             {
                 current->last_time += current->period_ms;
 
