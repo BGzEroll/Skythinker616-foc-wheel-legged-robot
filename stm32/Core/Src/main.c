@@ -24,12 +24,10 @@
 #include "tim.h"
 #include "gpio.h"
 
-extern void app_init(void);
-extern void app_loop(void);
-
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+extern void app_init(void);
+extern void app_loop(void);
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
