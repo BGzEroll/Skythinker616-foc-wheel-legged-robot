@@ -1,5 +1,7 @@
 #include "motor.h"
 
+#include <math.h>
+
 #include "devices/hw/encoder.h"
 #include "devices/io/can_comm.h"
 #include "main.h"
@@ -35,64 +37,72 @@ namespace motor
         float rotor_direction = 0.0f;
         float zero_electric_angle = 0.0f;
 
-        /**
-         * @brief 将角度限制到 [0, 2π)
-         */
+        // SimpleFOC 的角度归一化实现。
         float normalize_angle(float angle)
         {
-            while(angle >= two_pi){angle -= two_pi;}
-            while(angle < 0.0f){angle += two_pi;}
-            return angle;
+            const float normalized = fmodf(angle, two_pi);
+            return normalized >= 0.0f ? normalized : normalized + two_pi;
         }
 
-        /**
-         * @brief 计算当前电角度的正弦和余弦
-         *
-         * 使用四象限映射和短 Taylor 近似，避免在 F103 的控制中断中引入
-         * 完整 sinf/cosf 路径。
-         */
-        void sine_cosine(float angle, float &sine, float &cosine)
+        // SimpleFOC 的查表插值实现，保留 _sin/_cos/_sincos 的计算路径。
+        float foc_sin(float angle)
         {
-            angle = normalize_angle(angle);
-
-            const uint8_t quadrant = (uint8_t)(angle / pi_2);
-            const float offset = angle - (float)quadrant * pi_2;
-            const float offset_squared = offset * offset;
-            const float sine_offset = offset * (1.0f + offset_squared *
-                (-0.1666666667f + offset_squared *
-                (0.0083333333f + offset_squared *
-                (-0.0001984127f + offset_squared *
-                (0.0000027557f - offset_squared * 0.0000000251f)))));
-            const float complement = pi_2 - offset;
-            const float complement_squared = complement * complement;
-            const float cosine_offset = complement * (1.0f +
-                complement_squared * (-0.1666666667f + complement_squared *
-                (0.0083333333f + complement_squared *
-                (-0.0001984127f + complement_squared *
-                (0.0000027557f - complement_squared * 0.0000000251f)))));
-
-            switch(quadrant)
+            static const uint16_t sine_array[65] =
             {
-                case 0:
-                    sine = sine_offset;
-                    cosine = cosine_offset;
-                    break;
+                0, 804, 1608, 2411, 3212, 4011, 4808, 5602,
+                6393, 7180, 7962, 8740, 9512, 10279, 11039, 11793,
+                12540, 13279, 14010, 14733, 15447, 16151, 16846, 17531,
+                18205, 18868, 19520, 20160, 20788, 21403, 22006, 22595,
+                23170, 23732, 24279, 24812, 25330, 25833, 26320, 26791,
+                27246, 27684, 28106, 28511, 28899, 29269, 29622, 29957,
+                30274, 30572, 30853, 31114, 31357, 31581, 31786, 31972,
+                32138, 32286, 32413, 32522, 32610, 32679, 32729, 32758,
+                32768
+            };
 
-                case 1:
-                    sine = cosine_offset;
-                    cosine = -sine_offset;
-                    break;
+            int32_t t1;
+            int32_t t2;
+            unsigned int index =
+                (unsigned int)(angle * (64U * 4U * 256.0f / two_pi));
+            const int32_t fraction = (int32_t)(index & 0xffU);
+            index = (index >> 8) & 0xffU;
 
-                case 2:
-                    sine = -sine_offset;
-                    cosine = -cosine_offset;
-                    break;
-
-                default:
-                    sine = -cosine_offset;
-                    cosine = sine_offset;
-                    break;
+            if(index < 64U)
+            {
+                t1 = sine_array[index];
+                t2 = sine_array[index + 1U];
             }
+            else if(index < 128U)
+            {
+                t1 = sine_array[128U - index];
+                t2 = sine_array[127U - index];
+            }
+            else if(index < 192U)
+            {
+                t1 = -sine_array[index - 128U];
+                t2 = -sine_array[index - 127U];
+            }
+            else
+            {
+                t1 = -sine_array[256U - index];
+                t2 = -sine_array[255U - index];
+            }
+
+            return (1.0f / 32768.0f) *
+                (t1 + (((t2 - t1) * fraction) >> 8));
+        }
+
+        float foc_cos(float angle)
+        {
+            float sine_angle = angle + pi_2;
+            sine_angle = sine_angle > two_pi ? sine_angle - two_pi : sine_angle;
+            return foc_sin(sine_angle);
+        }
+
+        void foc_sincos(float angle, float *sine, float *cosine)
+        {
+            *sine = foc_sin(angle);
+            *cosine = foc_cos(angle);
         }
 
         /**
@@ -107,13 +117,18 @@ namespace motor
             if(uq > voltage_limit){uq = voltage_limit;}
             else if(uq < -voltage_limit){uq = -voltage_limit;}
 
-            const float max_voltage = bus_voltage * max_modulation;
-            if(uq > max_voltage){uq = max_voltage;}
-            else if(uq < -max_voltage){uq = -max_voltage;}
+            if(uq > bus_voltage * max_modulation)
+            {
+                uq = bus_voltage * max_modulation;
+            }
+            else if(uq < -bus_voltage * max_modulation)
+            {
+                uq = -bus_voltage * max_modulation;
+            }
 
             float sine;
             float cosine;
-            sine_cosine(electrical_angle, sine, cosine);
+            foc_sincos(normalize_angle(electrical_angle), &sine, &cosine);
 
             // Inverse Park transform with Ud fixed to zero, followed by Clarke.
             const float alpha = -sine * uq;
@@ -136,7 +151,6 @@ namespace motor
             phase_b = (phase_b + center) / bus_voltage;
             phase_c = (phase_c + center) / bus_voltage;
 
-            const uint32_t period = __HAL_TIM_GET_AUTORELOAD(&htim2);
             if(!(phase_a >= 0.0f)){phase_a = 0.0f;}
             else if(phase_a > 1.0f){phase_a = 1.0f;}
             if(!(phase_b >= 0.0f)){phase_b = 0.0f;}
@@ -145,11 +159,11 @@ namespace motor
             else if(phase_c > 1.0f){phase_c = 1.0f;}
 
             __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1,
-                (uint32_t)(phase_a * (float)period + 0.5f));
+                (uint32_t)(phase_a * 1600.0f + 0.5f));
             __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2,
-                (uint32_t)(phase_b * (float)period + 0.5f));
+                (uint32_t)(phase_b * 1600.0f + 0.5f));
             __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3,
-                (uint32_t)(phase_c * (float)period + 0.5f));
+                (uint32_t)(phase_c * 1600.0f + 0.5f));
         }
 
         void enable_driver()
@@ -245,12 +259,11 @@ namespace motor
 
         enable_driver();
         const float direction_start = package.full_angle;
-        const float direction_step = two_pi / (float)direction_steps;
         for(uint16_t step = 0; step <= direction_steps; ++step)
         {
             set_phase_voltage(
                 alignment_voltage,
-                three_pi_2 + direction_step * (float)step);
+                three_pi_2 + two_pi * (float)step / (float)direction_steps);
             as5600::update();
             sys_time::delay_ms(direction_step_duration_ms);
         }
