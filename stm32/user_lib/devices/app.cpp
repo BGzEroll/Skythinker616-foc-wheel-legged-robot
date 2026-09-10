@@ -15,7 +15,7 @@ void task_list()
     task::create(
         &encoder_task,
         [](){as5600::update();},
-        1);
+        0);
 
     static task_node can_comm_test_task;
     task::create(&can_comm_test_task, can_comm_test, 2);
