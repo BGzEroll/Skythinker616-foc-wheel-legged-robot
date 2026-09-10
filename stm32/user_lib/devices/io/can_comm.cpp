@@ -351,9 +351,13 @@ namespace can_comm
     bool send_feedback(const encoder_package &package)
     {
         uint8_t data[8];
+        static uint16_t sequence = 0;
 
-        memcpy(&data[0], &package.full_angle, sizeof(float));
-        memcpy(&data[4], &package.speed, sizeof(float));
+        sequence++;
+
+        memcpy(&data[0], &sequence, sizeof(uint16_t));
+        memcpy(&data[2], &package.timestamp_us, sizeof(uint16_t));
+        memcpy(&data[4], &package.full_count, sizeof(int32_t));
 
         return send_frame(
             feedback_id,

@@ -5,12 +5,11 @@
 
 struct encoder_package
 {
-    uint32_t timestamp_ms = 0;
-    uint32_t sequence = 0;
+    uint16_t timestamp_us = 0;
 
+    int32_t full_count = 0;
     float angle = 0.0f;
     float full_angle = 0.0f;
-    float speed = 0.0f;
 };
 
 namespace as5600
