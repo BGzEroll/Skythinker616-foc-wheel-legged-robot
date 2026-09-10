@@ -8,7 +8,7 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
     echo ""
     echo "Parses: A5 5A | CAN ID (little-endian) | DLC | payload | XOR checksum"
     echo "Every valid CAN UART frame is displayed immediately."
-    echo "Extended feedback IDs (0x04000000 | device_id) are decoded as sequence, timestamp_us, full_count, and full_angle."
+    echo "Extended feedback IDs (0x04000000 | device_id) are decoded as sequence, timestamp_us, full_count, full_angle, and derived speed."
     echo "Legacy standard ID 0x100 with 8 data bytes is also supported."
     exit 0
 fi
@@ -52,6 +52,7 @@ FEEDBACK_ID_TYPE_MASK = 0x1C000000
 DEVICE_ID_MASK = 0x03FFFFFF
 ENCODER_RESOLUTION = 4096
 COUNT_TO_RAD = 2.0 * 3.141592653589793 / ENCODER_RESOLUTION
+FEEDBACK_HISTORY = {}
 
 
 def extract_frames(buffer):
@@ -99,8 +100,15 @@ def extract_frames(buffer):
     return frames
 
 
+def signed_delta32(current, previous):
+    delta = (current - previous) & 0xFFFFFFFF
+    if delta & 0x80000000:
+        delta -= 0x100000000
+    return delta
+
+
 def format_frame(can_id, data):
-    raw = data.hex(" ")
+    raw = data.hex()
     is_feedback = (
         (can_id & FEEDBACK_ID_TYPE_MASK) == FEEDBACK_ID_BASE
         and len(data) == 8
@@ -109,20 +117,49 @@ def format_frame(can_id, data):
     if is_feedback:
         sequence, timestamp_us, full_count = struct.unpack("<HHi", data)
         full_angle = full_count * COUNT_TO_RAD
+        previous = FEEDBACK_HISTORY.get(can_id)
+        speed = None
+        if previous is not None:
+            previous_timestamp, previous_count, previous_speed, previous_sequence = previous
+            sequence_delta = (sequence - previous_sequence) & 0xFFFF
+            timestamp_delta = (timestamp_us - previous_timestamp) & 0xFFFF
+
+            # timestamp_us is uint16_t in the STM32 packet. Modular subtraction
+            # handles its wraparound; reject an implausibly large gap after a
+            # restart instead of producing a false speed spike.
+            if 0 < sequence_delta <= 1000 and 0 < timestamp_delta <= 0x8000:
+                speed = (
+                    signed_delta32(full_count, previous_count)
+                    * COUNT_TO_RAD
+                    * 1000000.0
+                    / timestamp_delta
+                )
+            elif timestamp_delta == 0:
+                # The STM32 can send the same encoder sample in multiple CAN
+                # frames. Keep the last calculated speed for those repeats.
+                speed = previous_speed
+
+        FEEDBACK_HISTORY[can_id] = (
+            timestamp_us,
+            full_count,
+            speed,
+            sequence,
+        )
+        speed_text = "UNAVAILABLE" if speed is None else f"{speed:+012.6f}"
         return (
-            f"id=0x{can_id:08X} "
-            f"feedback device_id=0x{can_id & DEVICE_ID_MASK:06X} "
-            f"sequence={sequence} timestamp_us={timestamp_us} "
-            f"full_count={full_count} full_angle={full_angle: .6f} raw={raw}"
+            f"id=0x{can_id:08X}|type=feedback|"
+            f"device_id=0x{can_id & DEVICE_ID_MASK:06X}|"
+            f"sequence={sequence:05d}|timestamp_us={timestamp_us:05d}|"
+            f"full_count={full_count:+011d}|full_angle={full_angle:+012.6f}|"
+            f"speed={speed_text}|raw={raw}"
         )
     if is_legacy_feedback:
         full_angle, speed = struct.unpack("<ff", data)
         return (
-            f"id=0x{can_id:08X} legacy_feedback "
-            f"full_angle={full_angle: .6f} "
-            f"speed={speed: .6f} raw={raw}"
+            f"id=0x{can_id:08X}|type=legacy_feedback|"
+            f"full_angle={full_angle:+012.6f}|speed={speed:+012.6f}|raw={raw}"
         )
-    return f"id=0x{can_id:08X} dlc={len(data)} data={raw}"
+    return f"id=0x{can_id:08X}|type=can|dlc={len(data):02d}|data={raw}"
 
 
 port = sys.argv[1]
