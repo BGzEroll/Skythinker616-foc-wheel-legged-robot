@@ -8,7 +8,7 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
     echo ""
     echo "Parses: A5 5A | CAN ID (little-endian) | DLC | payload | XOR checksum"
     echo "Every valid CAN UART frame is displayed immediately."
-    echo "Extended feedback IDs (0x04000000 | device_id) with 8 data bytes are decoded as full_angle and speed."
+    echo "Extended feedback IDs (0x04000000 | device_id) are decoded as sequence, timestamp_us, full_count, and full_angle."
     echo "Legacy standard ID 0x100 with 8 data bytes is also supported."
     exit 0
 fi
@@ -50,6 +50,8 @@ HEADER_SIZE = 2 + 4 + 1
 FEEDBACK_ID_BASE = 0x04000000
 FEEDBACK_ID_TYPE_MASK = 0x1C000000
 DEVICE_ID_MASK = 0x03FFFFFF
+ENCODER_RESOLUTION = 4096
+COUNT_TO_RAD = 2.0 * 3.141592653589793 / ENCODER_RESOLUTION
 
 
 def extract_frames(buffer):
@@ -104,14 +106,19 @@ def format_frame(can_id, data):
         and len(data) == 8
     )
     is_legacy_feedback = can_id == 0x100 and len(data) == 8
-    if is_feedback or is_legacy_feedback:
-        full_angle, speed = struct.unpack("<ff", data)
-        if is_feedback:
-            feedback_label = f"feedback device_id=0x{can_id & DEVICE_ID_MASK:06X}"
-        else:
-            feedback_label = "legacy_feedback"
+    if is_feedback:
+        sequence, timestamp_us, full_count = struct.unpack("<HHi", data)
+        full_angle = full_count * COUNT_TO_RAD
         return (
-            f"id=0x{can_id:08X} {feedback_label} "
+            f"id=0x{can_id:08X} "
+            f"feedback device_id=0x{can_id & DEVICE_ID_MASK:06X} "
+            f"sequence={sequence} timestamp_us={timestamp_us} "
+            f"full_count={full_count} full_angle={full_angle: .6f} raw={raw}"
+        )
+    if is_legacy_feedback:
+        full_angle, speed = struct.unpack("<ff", data)
+        return (
+            f"id=0x{can_id:08X} legacy_feedback "
             f"full_angle={full_angle: .6f} "
             f"speed={speed: .6f} raw={raw}"
         )
