@@ -1,5 +1,6 @@
 #include "task.h"
 #include "devices/hw/encoder.h"
+#include "devices/hw/motor.h"
 #include "devices/io/can_comm.h"
 #include "test.h"
 
@@ -31,6 +32,7 @@ extern "C" void app_init(void)
     can_comm::init();
 
     task_list();
+    motor::init();
 }
 
 /**
