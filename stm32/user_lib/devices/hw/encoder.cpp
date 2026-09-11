@@ -154,7 +154,7 @@ namespace as5600
                 if(dt_us != 0)
                 {
                     const float dt = (float)dt_us * 0.000001f;
-                    const float raw_speed = (float)delta * count_to_rad * 1000000.0f / dt;
+                    const float raw_speed = (float)delta * count_to_rad / dt;
                     const float alpha = dt / (speed_filter_tf + dt);
                     speed += alpha * (raw_speed - speed);
                 }
