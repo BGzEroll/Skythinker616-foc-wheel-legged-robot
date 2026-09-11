@@ -17,6 +17,9 @@ namespace motor
 
         // 电机 / 驱动固定参数
         constexpr uint8_t pole_pairs = 7;
+        constexpr float phase_resistance = 2.55f;
+        constexpr float torque_constant = 0.0434f;      // Kt
+        constexpr float bemf_constant = 0.02506f;       // KV = 220 RPM/V，则 BLDC q-axis voltage convention: Ke = 30 / (pi * sqrt(3) * KV)
         constexpr float bus_voltage = 12.0f;
         constexpr float voltage_limit = 4.0f;
         constexpr float pwm_period = 1600.0f;
@@ -325,7 +328,7 @@ namespace motor
          */
         void update()
         {
-            encoder_package encoder = {};
+            encoder_package encoder;
             if(!as5600::get_package(encoder))
             {
                 svpwm(0.0f, 0.0f);
@@ -338,16 +341,23 @@ namespace motor
                 encoder.angle -
                 zero_angle;
 
-            /*
-             * 当前为 voltage torque mode
-             *
-             * 后续 estimated_current 只需要在这里：
-             *
-             * torque -> Iq -> Uq
-             *
-             * 最下面的 foc() 不需要改变
-             */
-            svpwm(can_comm::get_target(), electrical_angle);
+            const float torque_target = can_comm::get_target();
+
+            // Nm -> q-axis current
+            float current = torque_target / torque_constant;
+
+            const float velocity = (float)direction * encoder.speed;
+            
+            // Back-EMF compensation
+            const float bemf = bemf_constant * velocity;
+
+            // Estimated-current voltage model
+            const float voltage =
+                current *
+                phase_resistance +
+                bemf;
+            
+            svpwm(voltage, electrical_angle);
         }
     }
 

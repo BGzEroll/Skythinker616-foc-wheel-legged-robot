@@ -10,6 +10,7 @@ struct encoder_package
     int32_t full_count = 0;
     float angle = 0.0f;
     float full_angle = 0.0f;
+    float speed = 0.0f;
 };
 
 namespace as5600
