@@ -8,7 +8,7 @@ struct target_package
     uint32_t timestamp_ms = 0;
     uint32_t sequence = 0;
 
-    float voltage = 0.0f;
+    float torque = 0.0f;
 };
 
 namespace can_comm

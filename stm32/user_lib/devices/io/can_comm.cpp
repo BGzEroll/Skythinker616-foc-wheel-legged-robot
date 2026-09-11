@@ -215,13 +215,13 @@ namespace can_comm
                 return;
             }
 
-            float voltage;
-            memcpy(&voltage, data, sizeof(voltage));
+            float torque;
+            memcpy(&torque, data, sizeof(torque));
 
             target_package new_package;
             new_package.timestamp_ms = HAL_GetTick();
             new_package.sequence = ++sequence;
-            new_package.voltage = voltage;
+            new_package.torque = torque;
 
             const uint32_t primask = __get_PRIMASK();
             __disable_irq();
