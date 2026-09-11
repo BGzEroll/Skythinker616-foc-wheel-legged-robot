@@ -1,4 +1,4 @@
-#include "start.h"
+﻿#include "start.h"
 #include "task.h"
 #include "led_dev.h"
 #include "bus/uart_bus.h"
@@ -17,7 +17,7 @@ namespace
     constexpr uint32_t can_device_id_mask = 0x03FFFFFF;
 
     constexpr uint32_t can_discovery_period_ms = 500;
-    constexpr float foc_target_value = 0.01f;
+    constexpr float foc_target_value = 0.5f;
 
     // STM32 的 device_id 由 UID 计算，运行时从反馈/发现响应中学习。
     volatile uint32_t foc_target_device_id = 0;
