@@ -328,20 +328,19 @@ namespace motor
             encoder_package encoder = {};
             target_package target = {};
 
-            // 暂时关闭 can 指令获取
-            // if(!as5600::get_package(encoder) ||
-            //    !can_comm::get_package(target))
-            // {
-            //     svpwm(0.0f, 0.0f);
-            //     return;
-            // }
+            if(!as5600::get_package(encoder) ||
+               !can_comm::get_package(target))
+            {
+                svpwm(0.0f, 0.0f);
+                return;
+            }
 
-            // // CAN 指令超时保护，暂时关闭这个
-            // if(sys_time::get_ms_tick() - target.timestamp_ms > command_timeout_ms)
-            // {
-            //     svpwm(0.0f, 0.0f);
-            //     return;
-            // }
+            // CAN 指令超时保护
+            if(sys_time::get_ms_tick() - target.timestamp_ms > command_timeout_ms)
+            {
+                svpwm(0.0f, 0.0f);
+                return;
+            }
 
             if(!as5600::get_package(encoder))
             {
@@ -354,9 +353,6 @@ namespace motor
                 (float)pole_pairs *
                 encoder.angle -
                 zero_angle;
-
-            // 临时调试用
-            target.torque = 1.0f;
 
             /*
              * 当前为 voltage torque mode。
