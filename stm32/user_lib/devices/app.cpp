@@ -29,8 +29,8 @@ extern "C" void app_init(void)
 {
     test_init();
     as5600::init();
-    motor::init();
     can_comm::init();
+    motor::init();
 
     task_list();
 }
