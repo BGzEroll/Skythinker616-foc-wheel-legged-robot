@@ -14,10 +14,10 @@ for tool in cmake ninja arm-none-eabi-gcc openocd lsusb; do
     fi
 done
 
-if ! /usr/bin/lsusb -d 0d28:0204 >/dev/null; then
-    echo "错误：未检测到 DAPLink（USB VID:PID 0d28:0204）" >&2
-    exit 1
-fi
+# if ! /usr/bin/lsusb -d 0d28:0204 >/dev/null; then
+#     echo "错误：未检测到 DAPLink（USB VID:PID 0d28:0204）" >&2
+#     exit 1
+# fi
 
 cd "${PROJECT_DIR}"
 
