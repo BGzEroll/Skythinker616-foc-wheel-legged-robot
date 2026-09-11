@@ -21,8 +21,7 @@ namespace motor
         constexpr float torque_constant = 0.0434f;      // Kt
         constexpr float bemf_constant = 0.02506f;       // KV = 220 RPM/V，则 BLDC q-axis voltage convention: Ke = 30 / (pi * sqrt(3) * KV)
         constexpr float bus_voltage = 12.0f;
-        constexpr float voltage_limit = 4.0f;
-        constexpr float pwm_period = 1600.0f;
+        constexpr float voltage_limit = 8.4f;
 
         // SVPWM 最大可用 q 轴电压约为 Vbus / sqrt(3)
         constexpr float svpwm_limit = bus_voltage * 0.57735026918962576451f;
@@ -211,9 +210,9 @@ namespace motor
             if(phase_c < 0.0f){phase_c = 0.0f;}
             else if(phase_c > 1.0f){phase_c = 1.0f;}
 
-            TIM2->CCR1 = (uint32_t)(phase_a * pwm_period + 0.5f);
-            TIM2->CCR2 = (uint32_t)(phase_b * pwm_period + 0.5f);
-            TIM2->CCR3 = (uint32_t)(phase_c * pwm_period + 0.5f);
+            TIM2->CCR1 = (uint32_t)(phase_a * 1600.0f + 0.5f);
+            TIM2->CCR2 = (uint32_t)(phase_b * 1600.0f + 0.5f);
+            TIM2->CCR3 = (uint32_t)(phase_c * 1600.0f + 0.5f);
         }
 
         /**

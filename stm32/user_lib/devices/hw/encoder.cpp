@@ -97,6 +97,8 @@ namespace as5600
         constexpr int32_t half_resolution = resolution / 2;
         constexpr float count_to_rad = 2.0f * 3.14159265358979323846f / (float)resolution;
 
+        constexpr float speed_filter_tf = 0.003f;       // 3ms
+
         uint8_t raw_data[2];
 
         bool initialized = false;
@@ -105,6 +107,7 @@ namespace as5600
 
         uint16_t last_raw = 0;
         uint16_t last_time_us = 0;
+        float speed = 0.0f;
         int32_t full_count = 0;
         
         /**
@@ -131,8 +134,6 @@ namespace as5600
             const uint16_t raw = (((uint16_t)raw_data[0] & 0x0F) << 8) | raw_data[1];
             const uint16_t now_us = (uint16_t)i2c::dma_complete_time_us;
 
-            float speed = 0.0f;
-
             if(first_sample)
             {
                 first_sample = false;
@@ -152,7 +153,10 @@ namespace as5600
                 const uint16_t dt_us = (uint16_t)(now_us - last_time_us);
                 if(dt_us != 0)
                 {
-                    speed = (float)delta * count_to_rad * 1000000.0f / (float)dt_us;
+                    const float dt = (float)dt_us * 0.000001f;
+                    const float raw_speed = (float)delta * count_to_rad * 1000000.0f / dt;
+                    const float alpha = dt / (speed_filter_tf + dt);
+                    speed += alpha * (raw_speed - speed);
                 }
                 
                 last_raw = raw;
