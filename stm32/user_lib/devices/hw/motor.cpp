@@ -23,17 +23,10 @@ namespace motor
         constexpr float bus_voltage = 12.0f;
         constexpr float voltage_limit = 4.0f;
         constexpr float alignment_voltage = 0.4f;
-        constexpr uint32_t alignment_duration_ms = 500;
-        constexpr uint32_t encoder_wait_timeout_ms = 100;
         constexpr uint16_t direction_steps = 100;
-        constexpr uint32_t direction_step_duration_ms = 2;
         constexpr float direction_min_delta = two_pi / 100.0f;
-        constexpr uint32_t target_timeout_ms = 100;
-        // TIM2 CH4 的 CCR4=800 比较事件只在向下计数时产生：20 kHz / 2 = 10 kHz。
-        constexpr uint8_t control_update_divider = 2;
 
         volatile bool initialized = false;
-        volatile uint8_t update_count = 0;
         float rotor_direction = 0.0f;
         float zero_electric_angle = 0.0f;
 
@@ -193,12 +186,14 @@ namespace motor
                 return;
             }
 
-            if(can_comm::get_package(target) &&
-               (uint32_t)(sys_time::get_ms_tick() - target.timestamp_ms) <=
-                   target_timeout_ms)
-            {
-                target_voltage = target.voltage;
-            }
+            // if(can_comm::get_package(target) &&
+            //    (uint32_t)(sys_time::get_ms_tick() - target.timestamp_ms) <=
+            //        100)
+            // {
+            //     target_voltage = target.voltage;
+            // }
+
+            target_voltage = 1;
 
             const float electrical_angle = normalize_angle(
                 rotor_direction * (float)pole_pairs * encoder.angle -
@@ -246,7 +241,7 @@ namespace motor
             sys_time::delay_ms(1);
         }
         while((uint32_t)(sys_time::get_ms_tick() - encoder_start) <
-            encoder_wait_timeout_ms);
+            100);
 
         if(!package_valid)
         {
@@ -265,7 +260,7 @@ namespace motor
                 alignment_voltage,
                 three_pi_2 + two_pi * (float)step / (float)direction_steps);
             as5600::update();
-            sys_time::delay_ms(direction_step_duration_ms);
+            sys_time::delay_ms(2);
         }
 
         package_valid = as5600::get_package(package);
@@ -305,7 +300,7 @@ namespace motor
         enable_driver();
         const uint32_t alignment_start = sys_time::get_ms_tick();
         while((uint32_t)(sys_time::get_ms_tick() - alignment_start) <
-            alignment_duration_ms)
+            500)
         {
             as5600::update();
             sys_time::delay_ms(1);
@@ -328,7 +323,6 @@ namespace motor
         enable_driver();
         __HAL_TIM_CLEAR_FLAG(&htim2, TIM_FLAG_UPDATE);
         __HAL_TIM_CLEAR_FLAG(&htim2, TIM_FLAG_CC4);
-        update_count = 0;
         initialized = true;
         if(HAL_TIM_OC_Start_IT(&htim2, TIM_CHANNEL_4) != HAL_OK)
         {
@@ -348,15 +342,18 @@ namespace motor
 
 extern "C" void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *timer)
 {
+    static bool foc_toggle = false;
+
     if(timer != &htim2 || timer->Channel != HAL_TIM_ACTIVE_CHANNEL_4)
     {
         return;
     }
 
-    motor::update_count++;
-    if(motor::update_count >= motor::control_update_divider)
+    foc_toggle = !foc_toggle;
+    if(foc_toggle)
     {
-        motor::update_count = 0;
-        motor::loop();
+        return;
     }
+
+    motor::loop();
 }
