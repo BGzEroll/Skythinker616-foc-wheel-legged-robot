@@ -342,12 +342,6 @@ namespace motor
                 return;
             }
 
-            if(!as5600::get_package(encoder))
-            {
-                svpwm(0.0f, 0.0f);
-                return;
-            }
-
             const float electrical_angle =
                 (float)direction *
                 (float)pole_pairs *
