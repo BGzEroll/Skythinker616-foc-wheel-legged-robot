@@ -44,7 +44,7 @@ namespace can_comm
         uint32_t feedback_id = 0;
         uint32_t response_id = 0;
 
-        volatile float latest_target = 0.0f;
+        volatile fixed::q16_t latest_target_q16 = 0;
         volatile uint32_t latest_target_time = 0;
     }
 
@@ -204,22 +204,83 @@ namespace can_comm
         }
 
         /**
-         * @brief 处理收到的目标电压
+         * @brief 将原有 CAN IEEE754 浮点线协议直接解码为 Q16.16
+         *
+         * 不在固件中执行浮点转换，保持上位机 4 字节协议不变。
+         */
+        fixed::q16_t decode_q16(uint32_t bits)
+        {
+            constexpr uint64_t positive_limit = 0x7FFFFFFFULL;
+            constexpr uint64_t negative_limit = 0x80000000ULL;
+
+            const bool negative = (bits & 0x80000000u) != 0;
+            const uint32_t exponent = (bits >> 23) & 0xFFu;
+            const uint32_t fraction = bits & 0x007FFFFFu;
+
+            // 零、非规格化数、NaN 和无穷大均不作为有效扭矩目标。
+            if(exponent == 0 || exponent == 0xFFu)
+            {
+                return 0;
+            }
+
+            const uint64_t mantissa =
+                0x00800000ULL | static_cast<uint64_t>(fraction);
+            const int32_t shift = static_cast<int32_t>(exponent) - 134;
+
+            uint64_t magnitude = 0;
+            if(shift >= 0)
+            {
+                if(shift >= 32 ||
+                   mantissa > (negative ? negative_limit : positive_limit) >> shift)
+                {
+                    return negative ? fixed::q16_min : fixed::q16_max;
+                }
+
+                magnitude = mantissa << shift;
+            }
+            else
+            {
+                const uint32_t right_shift = static_cast<uint32_t>(-shift);
+                magnitude = right_shift >= 64 ? 0 : mantissa >> right_shift;
+            }
+
+            if(negative)
+            {
+                if(magnitude >= negative_limit)
+                {
+                    return fixed::q16_min;
+                }
+
+                return static_cast<fixed::q16_t>(-
+                    static_cast<int64_t>(magnitude)
+                );
+            }
+
+            if(magnitude > positive_limit)
+            {
+                return fixed::q16_max;
+            }
+
+            return static_cast<fixed::q16_t>(magnitude);
+        }
+
+        /**
+         * @brief 处理收到的目标扭矩
          */
         void receive_target(const CAN_RxHeaderTypeDef &header, const uint8_t *data)
         {
             if(header.IDE != CAN_ID_EXT ||
                header.RTR != CAN_RTR_DATA ||
                header.ExtId != command_id ||
-               header.DLC != sizeof(float))
+               header.DLC != sizeof(uint32_t))
             {
                 return;
             }
 
-            float torque;
-            memcpy(&torque, data, sizeof(torque));
+            uint32_t torque_bits;
+            memcpy(&torque_bits, data, sizeof(torque_bits));
 
-            latest_target = torque;
+            latest_target_q16 = decode_q16(torque_bits);
             latest_target_time = sys_time::get_ms_tick();
         }
         
@@ -246,7 +307,7 @@ namespace can_comm
                 return;
             }
 
-            // Target voltage
+            // Target torque
             if(header.IDE == CAN_ID_EXT &&
                header.ExtId == command_id)
             {
@@ -312,14 +373,14 @@ namespace can_comm
      *
      * @return 最新的目标
      */
-    float get_target()
+    fixed::q16_t get_target_q16()
     {
         if(sys_time::get_ms_tick() - latest_target_time > 100)
         {
-            return 0.0f;
+            return 0;
         }
 
-        return latest_target;
+        return latest_target_q16;
     }
 
     /**

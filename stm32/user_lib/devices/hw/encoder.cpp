@@ -95,9 +95,9 @@ namespace as5600
 
         constexpr int32_t resolution = 4096;
         constexpr int32_t half_resolution = resolution / 2;
-        constexpr float count_to_rad = 2.0f * 3.14159265358979323846f / (float)resolution;
-
-        constexpr float speed_filter_tf = 0.003f;       // 3ms
+        // 2π / 4096，Q8.24，供速度计算保留更高的角度精度。
+        constexpr int32_t count_to_rad_q24 = 25736;
+        constexpr uint32_t speed_filter_tf_us = 3000;
 
         uint8_t raw_data[2];
 
@@ -107,8 +107,9 @@ namespace as5600
 
         uint16_t last_raw = 0;
         uint16_t last_time_us = 0;
-        float speed = 0.0f;
+        fixed::q16_t speed_q16 = 0;
         int32_t full_count = 0;
+        uint32_t sequence = 0;
         
         /**
          * @brief 发起一次 DMA 读取
@@ -153,10 +154,27 @@ namespace as5600
                 const uint16_t dt_us = (uint16_t)(now_us - last_time_us);
                 if(dt_us != 0)
                 {
-                    const float dt = (float)dt_us * 0.000001f;
-                    const float raw_speed = (float)delta * count_to_rad / dt;
-                    const float alpha = dt / (speed_filter_tf + dt);
-                    speed += alpha * (raw_speed - speed);
+                    const int64_t raw_speed_q16 =
+                        static_cast<int64_t>(delta) *
+                        static_cast<int64_t>(count_to_rad_q24) *
+                        1000000LL /
+                        (static_cast<int64_t>(dt_us) * 256LL);
+
+                    const fixed::q16_t raw_speed =
+                        fixed::saturate_q16(raw_speed_q16);
+
+                    const uint32_t alpha_q16 =
+                        (static_cast<uint32_t>(dt_us) << 16) /
+                        (speed_filter_tf_us + dt_us);
+
+                    const int64_t speed_delta =
+                        static_cast<int64_t>(raw_speed) -
+                        static_cast<int64_t>(speed_q16);
+
+                    speed_q16 = fixed::saturate_q16(
+                        static_cast<int64_t>(speed_q16) +
+                        (speed_delta * alpha_q16 >> 16)
+                    );
                 }
                 
                 last_raw = raw;
@@ -165,10 +183,11 @@ namespace as5600
 
             encoder_package new_package;
             new_package.timestamp_us = (uint16_t)i2c::dma_complete_time_us;
+            new_package.timestamp_ms = HAL_GetTick();
+            new_package.angle_phase = static_cast<uint16_t>(raw << 4);
             new_package.full_count = full_count;
-            new_package.angle = (float)raw * count_to_rad;
-            new_package.full_angle = (float)full_count * count_to_rad;
-            new_package.speed = speed;
+            new_package.speed_q16 = speed_q16;
+            new_package.sequence = ++sequence;
 
             // 使用临界区保护数据包更新，防止中断导致数据不一致
             const uint32_t primask = __get_PRIMASK();
@@ -243,13 +262,17 @@ namespace as5600
      */
     bool get_package(encoder_package &snapshot)
     {
-        if(!initialized || !package_valid)
+        const uint32_t primask = __get_PRIMASK();
+        __disable_irq();
+
+        const bool valid = initialized && package_valid;
+        if(valid)
         {
-            return false;
+            snapshot = latest_package;
         }
 
-        snapshot = latest_package;
-        return true;
+        __set_PRIMASK(primask);
+        return valid;
     }
 }
 
