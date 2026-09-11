@@ -124,8 +124,8 @@ namespace motor
         /**
          * @brief SpaceVectorPWM 核心路径
          *
-         * voltage 为 q 轴目标电压。
-         * d 轴固定为 0。
+         * voltage 为 q 轴目标电压
+         * d 轴固定为 0
          *
          * 内部完成：
          * inverse Park
@@ -321,22 +321,12 @@ namespace motor
         /**
          * @brief FOC 实时更新
          *
-         * 由 TIM2 中断周期调用。
+         * 由 TIM2 中断周期调用
          */
         void update()
         {
             encoder_package encoder = {};
-            target_package target = {};
-
-            if(!as5600::get_package(encoder) ||
-               !can_comm::get_package(target))
-            {
-                svpwm(0.0f, 0.0f);
-                return;
-            }
-
-            // CAN 指令超时保护
-            if(sys_time::get_ms_tick() - target.timestamp_ms > command_timeout_ms)
+            if(!as5600::get_package(encoder))
             {
                 svpwm(0.0f, 0.0f);
                 return;
@@ -349,15 +339,15 @@ namespace motor
                 zero_angle;
 
             /*
-             * 当前为 voltage torque mode。
+             * 当前为 voltage torque mode
              *
              * 后续 estimated_current 只需要在这里：
              *
              * torque -> Iq -> Uq
              *
-             * 最下面的 foc() 不需要改变。
+             * 最下面的 foc() 不需要改变
              */
-            svpwm(target.torque, electrical_angle);
+            svpwm(can_comm::get_target(), electrical_angle);
         }
     }
 
@@ -444,8 +434,8 @@ namespace motor
 /**
  * @brief TIM2 CH4 FOC 中断
  *
- * Center-aligned PWM 下 CH4 每个完整 PWM 周期会比较两次，
- * 因此每隔一次执行一次 FOC。
+ * Center-aligned mode 1 下 CH4 每个 PWM 周期触发一次
+ * 这里再二分，使 FOC 以 PWM 一半的频率运行
  */
 void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *timer)
 {

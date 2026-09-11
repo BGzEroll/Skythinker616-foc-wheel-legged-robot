@@ -3,6 +3,7 @@
 #include "stm32f1xx_hal.h"
 #include "can.h"
 #include <string.h>
+#include "devices/sys_time.h"
 
 namespace can_comm
 {
@@ -43,8 +44,8 @@ namespace can_comm
         uint32_t feedback_id = 0;
         uint32_t response_id = 0;
 
-        target_package latest_package;
-        uint32_t sequence = 0;
+        volatile float latest_target = 0.0f;
+        volatile uint32_t latest_target_time = 0;
     }
 
     namespace
@@ -218,15 +219,8 @@ namespace can_comm
             float torque;
             memcpy(&torque, data, sizeof(torque));
 
-            target_package new_package;
-            new_package.timestamp_ms = HAL_GetTick();
-            new_package.sequence = ++sequence;
-            new_package.torque = torque;
-
-            const uint32_t primask = __get_PRIMASK();
-            __disable_irq();
-            latest_package = new_package;
-            __set_PRIMASK(primask);
+            latest_target = torque;
+            latest_target_time = sys_time::get_ms_tick();
         }
         
         /**
@@ -276,9 +270,6 @@ namespace can_comm
         feedback_id = feedback_base | device_id;
         response_id = response_base | device_id;
 
-        latest_package = {};
-        sequence = 0;
-
         /**
          * Filter Bank 0
          *
@@ -317,27 +308,18 @@ namespace can_comm
     }
 
     /**
-     * @brief 获取最新的目标电压数据包
+     * @brief 获取最新的目标
      *
-     * @param snapshot 输出参数，返回最新数据包
-     *
-     * @return true 成功获取到数据包
-     * @return false 尚未接收到任何数据包
+     * @return 最新的目标
      */
-    bool get_package(target_package &snapshot)
+    float get_target()
     {
-        const uint32_t primask = __get_PRIMASK();
-        __disable_irq();
-        if(latest_package.sequence == 0)
+        if(sys_time::get_ms_tick() - latest_target_time > 100)
         {
-            __set_PRIMASK(primask);
-            return false;
+            return 0.0f;
         }
 
-        snapshot = latest_package;
-        __set_PRIMASK(primask);
-
-        return true;
+        return latest_target;
     }
 
     /**

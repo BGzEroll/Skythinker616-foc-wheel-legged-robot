@@ -3,18 +3,10 @@
 
 #include "devices/hw/encoder.h"
 
-struct target_package
-{
-    uint32_t timestamp_ms = 0;
-    uint32_t sequence = 0;
-
-    float torque = 0.0f;
-};
-
 namespace can_comm
 {
     bool init();
-    bool get_package(target_package &snapshot);
+    float get_target();
     bool send_feedback(const encoder_package &package);
 }
 
