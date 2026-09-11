@@ -52,15 +52,29 @@ class can_dev {
             }
         }
 
-        void send(uint32_t id, const uint8_t *data, uint8_t len)
+        void send(uint32_t id, const uint8_t *data, uint8_t len, bool extended)
         {
+            if(!is_init ||
+               len > TWAI_FRAME_MAX_DLC ||
+               (!data && len > 0))
+            {
+                return;
+            }
+
             twai_message_t msg = {
-                .flags = 0,
-                .identifier = id,
+                .flags = extended
+                    ? static_cast<uint32_t>(TWAI_MSG_FLAG_EXTD)
+                    : static_cast<uint32_t>(TWAI_MSG_FLAG_NONE),
+                .identifier = extended
+                    ? (id & TWAI_EXTD_ID_MASK)
+                    : (id & TWAI_STD_ID_MASK),
                 .data_length_code = len
             };
 
-            memcpy(msg.data, data, len);
+            if(len > 0)
+            {
+                memcpy(msg.data, data, len);
+            }
             twai_transmit(&msg, 0);
         }
 
@@ -126,7 +140,7 @@ void can_bus::receive(void (*receive_cb)(uint32_t id, const uint8_t *data, uint8
  * 
  * @note 数据长度必须小于等于 8 字节
  */
-void can_bus::send(uint32_t id, const uint8_t *data, uint8_t len)
+void can_bus::send(uint32_t id, const uint8_t *data, uint8_t len, bool extended)
 {
-    get_dev(bus_id)->send(id, data, len);
+    get_dev(bus_id)->send(id, data, len, extended);
 }
