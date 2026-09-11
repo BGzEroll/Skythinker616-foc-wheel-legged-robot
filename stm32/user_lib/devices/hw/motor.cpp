@@ -21,7 +21,7 @@ namespace motor
         constexpr float torque_constant = 0.0434f;      // Kt
         constexpr float bemf_constant = 0.02506f;       // KV = 220 RPM/V，则 BLDC q-axis voltage convention: Ke = 30 / (pi * sqrt(3) * KV)
         constexpr float bus_voltage = 12.0f;
-        constexpr float voltage_limit = 8.4f;
+        constexpr float voltage_limit = 12.0f;
 
         // SVPWM 最大可用 q 轴电压约为 Vbus / sqrt(3)
         constexpr float svpwm_limit = bus_voltage * 0.57735026918962576451f;

@@ -30,7 +30,7 @@ extern "C" void app_init(void)
     test_init();
     as5600::init();
     can_comm::init();
-    motor::init();
+    // motor::init();
 
     task_list();
 }
