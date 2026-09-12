@@ -204,7 +204,7 @@ namespace can_comm
         }
 
         /**
-         * @brief 处理收到的目标电压
+         * @brief 处理收到的目标扭矩
          */
         void receive_target(const CAN_RxHeaderTypeDef &header, const uint8_t *data)
         {

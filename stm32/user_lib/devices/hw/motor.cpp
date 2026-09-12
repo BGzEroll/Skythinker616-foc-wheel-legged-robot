@@ -43,7 +43,7 @@ namespace motor
          * Ke = 0.02506 V/(rad/s)
          * Vbus = 12 V
          */
-        constexpr int32_t BEMF_GAIN_Q16 = 4485;
+        constexpr int32_t BEMF_GAIN_Q14 = 1121;
 
         int8_t direction = 0;
         phase_t zero_phase = 0;
@@ -243,11 +243,11 @@ namespace motor
             if(!as5600::get_package(encoder)){return false;}
 
             const int32_t delta = encoder.full_count - start_count;
-            if(delta > direction_min_count)
+            if(delta >= direction_min_count)
             {
                 direction = 1;
             }
-            else if(delta < -direction_min_count)
+            else if(delta <= -direction_min_count)
             {
                 direction = -1;
             }
@@ -327,7 +327,7 @@ namespace motor
                     (int32_t)zero_phase
                 );
 
-            const float torque_mNm = can_comm::get_target_mNm();
+            const int32_t torque_mNm = can_comm::get_target_mNm();
 
             const int32_t speed_mrad_s = (int32_t)direction * encoder.speed_mrad_s;
 
@@ -335,7 +335,7 @@ namespace motor
             const q15_t torque_uq = (torque_mNm * TORQUE_GAIN_Q8) >> 8;
 
             // Back-EMF compensation
-            const q15_t bemf_uq = (speed_mrad_s * BEMF_GAIN_Q16) >> 16;
+            const q15_t bemf_uq = (speed_mrad_s * BEMF_GAIN_Q14) >> 14;
             
             svpwm(torque_uq + bemf_uq, electrical_phase);
         }
@@ -343,6 +343,9 @@ namespace motor
 
     /**
      * @brief 初始化电机 FOC
+     *
+     * @return true 初始化成功
+     * @return false 初始化失败
      */
     bool init()
     {
