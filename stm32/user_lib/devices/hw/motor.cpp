@@ -25,7 +25,7 @@ namespace motor
         constexpr q15_t ALIGNMENT_UQ = 8192;    // 校准电压 3V / 12V
 
         // 编码器校准参数
-        constexpr uint16_t direction_steps = 100;
+        constexpr uint16_t direction_steps = 500;
         constexpr int32_t direction_min_count = 41;
         constexpr uint32_t alignment_settle_ms = 300;
         constexpr uint16_t zero_sample_count = 32;
@@ -159,13 +159,13 @@ namespace motor
         /**
          * @brief 获取多个新编码器样本的平均累计计数
          *
-         * @param average_count 输出平均累计计数
+         * @param average_phase 输出平均机械相位
          * @param sample_count 采样数量
          *
          * @return true 采样成功
          * @return false 采样超时
          */
-        bool get_average_count(int32_t &average_count, uint16_t sample_count)
+        bool get_average_phase(int32_t &average_phase, uint16_t sample_count)
         {
             int64_t sum = 0;
             uint16_t collected = 0;
@@ -179,7 +179,7 @@ namespace motor
                     encoder_package encoder;
                     if(as5600::get_package(encoder))
                     {
-                        sum += encoder.full_count;
+                        sum += (int64_t)encoder.full_count * 16;
                         collected++;
                     }
                 }
@@ -191,7 +191,7 @@ namespace motor
                 }
             }
 
-            average_count = (int32_t)(sum / sample_count);
+            average_phase = (int32_t)(sum / sample_count);
 
             return true;
         }
@@ -334,8 +334,8 @@ namespace motor
 
                 svpwm(ALIGNMENT_UQ, phase);
 
-                as5600::update();
                 sys_time::delay_ms(2);
+                as5600::update();
             }
 
             if(!as5600::get_package(encoder)){return false;}
@@ -354,8 +354,8 @@ namespace motor
 
                 svpwm(ALIGNMENT_UQ, phase);
 
-                as5600::update();
                 sys_time::delay_ms(2);
+                as5600::update();
             }
 
             if(!as5600::get_package(encoder)){return false;}
@@ -385,8 +385,8 @@ namespace motor
             wait_encoder(alignment_settle_ms);
 
             // 对多个真实的新编码器样本取平均
-            int32_t average_count;
-            if(!get_average_count(average_count, zero_sample_count))
+            int32_t average_phase;
+            if(!get_average_phase(average_phase, zero_sample_count))
             {
                 return false;
             }
@@ -395,7 +395,7 @@ namespace motor
                 (phase_t)(
                     (int32_t)direction *
                     pole_pairs *
-                    (int32_t)get_phase(average_count));
+                    average_phase);
 
             svpwm(0, 0);
 
