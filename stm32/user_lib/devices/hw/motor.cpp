@@ -27,6 +27,15 @@ namespace motor
         // 编码器校准参数
         constexpr uint16_t direction_steps = 100;
         constexpr int32_t direction_min_count = 41;
+        constexpr uint32_t alignment_settle_ms = 300;
+        constexpr uint16_t zero_sample_count = 32;
+
+        // 角度预测
+        constexpr uint16_t max_predict_us = 500;
+
+        // speed_mrad_s * us -> 16-bit mechanical phase
+        // 65536 / (2π * 1e9) ≈ 175 / 2^24
+        constexpr int32_t PHASE_PRED_GAIN_Q24 = 175;
 
         /*
          * torque_mNm -> normalized Uq Q15
@@ -133,6 +142,91 @@ namespace motor
         }
 
         /**
+         * @brief 保持当前电角度并持续更新编码器
+         *
+         * @param time_ms 保持时间，单位 ms
+         */
+        void wait_encoder(uint32_t time_ms)
+        {
+            const uint32_t start = sys_time::get_ms_tick();
+            while(sys_time::get_ms_tick() - start < time_ms)
+            {
+                as5600::update();
+                sys_time::delay_ms(1);
+            }
+        }
+
+        /**
+         * @brief 获取多个新编码器样本的平均累计计数
+         *
+         * @param average_count 输出平均累计计数
+         * @param sample_count 采样数量
+         *
+         * @return true 采样成功
+         * @return false 采样超时
+         */
+        bool get_average_count(int32_t &average_count, uint16_t sample_count)
+        {
+            int64_t sum = 0;
+            uint16_t collected = 0;
+
+            const uint32_t start = sys_time::get_ms_tick();
+            while(collected < sample_count)
+            {
+                // 只统计真正的新 DMA 样本
+                if(as5600::update())
+                {
+                    encoder_package encoder;
+                    if(as5600::get_package(encoder))
+                    {
+                        sum += encoder.full_count;
+                        collected++;
+                    }
+                }
+
+                // 防止 I2C 异常时永久卡死初始化
+                if(sys_time::get_ms_tick() - start > 100)
+                {
+                    return false;
+                }
+            }
+
+            average_count = (int32_t)(sum / sample_count);
+
+            return true;
+        }
+
+        /**
+         * @brief 根据编码器样本年龄预测当前机械角
+         *
+         * @param encoder 最新编码器数据
+         *
+         * @return 预测后的 16-bit 机械角
+         */
+        inline phase_t get_predicted_phase(const encoder_package &encoder)
+        {
+            const uint16_t now_us = (uint16_t)sys_time::get_us_tick();
+            uint16_t age_us = (uint16_t)(now_us - encoder.timestamp_us);
+
+            if(age_us > max_predict_us)
+            {
+                age_us = max_predict_us;
+            }
+
+            const int32_t phase_advance =
+                (int32_t)(
+                    (
+                        (int64_t)encoder.speed_mrad_s *
+                        age_us *
+                        PHASE_PRED_GAIN_Q24
+                    ) >> 24);
+
+            return (phase_t)(
+                    (int32_t)get_phase(encoder.full_count) +
+                    phase_advance);
+        }
+
+        /**
          * @brief Space Vector PWM
          *
          * @param uq q 轴归一化电压，Q15
@@ -216,13 +310,19 @@ namespace motor
 
             if(!as5600::get_package(encoder)){return false;}
 
-            // 检测编码器方向
             HAL_GPIO_WritePin(
                 DRV_EN_GPIO_Port,
-                DRV_EN_Pin,GPIO_PIN_SET);
+                DRV_EN_Pin,
+                GPIO_PIN_SET);
+
+            // 先固定到扫描起点
+            svpwm(ALIGNMENT_UQ, 0xC000);
+            wait_encoder(alignment_settle_ms);
+            if(!as5600::get_package(encoder)){return false;}
 
             const int32_t start_count = encoder.full_count;
 
+            // 正向扫描一个完整电角周期
             for(uint16_t i = 0; i <= direction_steps; ++i)
             {
                 const phase_t phase =
@@ -240,12 +340,38 @@ namespace motor
 
             if(!as5600::get_package(encoder)){return false;}
 
-            const int32_t delta = encoder.full_count - start_count;
-            if(delta >= direction_min_count)
+            const int32_t forward_count = encoder.full_count;
+
+            // 沿相同路径反向扫描
+            for(int32_t i = direction_steps; i >= 0; --i)
+            {
+                const phase_t phase =
+                    (phase_t)(
+                        0xC000u +
+                        (uint32_t)i *
+                        65536u /
+                        direction_steps);
+
+                svpwm(ALIGNMENT_UQ, phase);
+
+                as5600::update();
+                sys_time::delay_ms(2);
+            }
+
+            if(!as5600::get_package(encoder)){return false;}
+
+            const int32_t end_count = encoder.full_count;
+            const int32_t forward_delta = forward_count - start_count;
+            const int32_t reverse_delta = end_count - forward_count;
+
+            // 正扫与反扫必须表现出相反的运动方向
+            if(forward_delta >= direction_min_count &&
+                reverse_delta <= -direction_min_count)
             {
                 direction = 1;
             }
-            else if(delta <= -direction_min_count)
+            else if(forward_delta <= -direction_min_count &&
+                reverse_delta >= direction_min_count)
             {
                 direction = -1;
             }
@@ -254,40 +380,22 @@ namespace motor
                 return false;
             }
 
-            // 停止输出
-            svpwm(0, 0);
-
-            HAL_GPIO_WritePin(
-                DRV_EN_GPIO_Port,
-                DRV_EN_Pin,
-                GPIO_PIN_RESET);
-
-            // 固定电角度到 3π/2
+            // 反向扫描结束后已经回到 0xC000，再保持一段时间，让转子完全稳定
             svpwm(ALIGNMENT_UQ, 0xC000);
+            wait_encoder(alignment_settle_ms);
 
-            HAL_GPIO_WritePin(
-                DRV_EN_GPIO_Port,
-                DRV_EN_Pin,
-                GPIO_PIN_SET);
-
-            const uint32_t align_start = sys_time::get_ms_tick();
-            while(sys_time::get_ms_tick() - align_start < 500)
-            {
-                as5600::update();
-                sys_time::delay_ms(1);
-            }
-
-            if(!as5600::get_package(encoder))
+            // 对多个真实的新编码器样本取平均
+            int32_t average_count;
+            if(!get_average_count(average_count, zero_sample_count))
             {
                 return false;
             }
 
-            // 记录当前电角度作为零点
             zero_phase =
                 (phase_t)(
                     (int32_t)direction *
                     pole_pairs *
-                    (int32_t)get_phase(encoder.full_count));
+                    (int32_t)get_phase(average_count));
 
             svpwm(0, 0);
 
@@ -313,11 +421,13 @@ namespace motor
                 return;
             }
 
+            const phase_t mechanical_phase = get_predicted_phase(encoder);
+
             const phase_t electrical_phase =
                 (phase_t)(
                     (int32_t)direction *
                     pole_pairs *
-                    (int32_t)get_phase(encoder.full_count) -
+                    (int32_t)mechanical_phase -
                     (int32_t)zero_phase);
 
             const int32_t torque_mNm = can_comm::get_target_mNm();
