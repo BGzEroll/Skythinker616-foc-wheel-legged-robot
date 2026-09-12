@@ -70,7 +70,11 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+  SCB->VTOR = 0x08002000U;
+  __DSB();
+  __ISB();
+  /* A bootloader jump preserves PRIMASK; a hardware reset already has it clear. */
+  __enable_irq();
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/

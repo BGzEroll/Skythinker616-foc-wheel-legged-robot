@@ -174,6 +174,13 @@ const uint8_t APBPrescTable[8U] =  {0, 0, 0, 0, 1, 2, 3, 4};
   */
 void SystemInit (void)
 {
+#if defined(CAN_BOOTLOADER_BUILD)
+  /* Keep DRV_EN low before data/BSS initialization can delay main(). */
+  RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+  GPIOA->BRR = GPIO_BRR_BR3;
+  GPIOA->CRL = (GPIOA->CRL & ~(0xFUL << 12U)) | (0x2UL << 12U);
+  GPIOA->BRR = GPIO_BRR_BR3;
+#endif
 #if defined(STM32F100xE) || defined(STM32F101xE) || defined(STM32F101xG) || defined(STM32F103xE) || defined(STM32F103xG)
   #ifdef DATA_IN_ExtSRAM
     SystemInit_ExtMemCtl(); 

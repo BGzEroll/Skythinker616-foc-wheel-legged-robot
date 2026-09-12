@@ -4,6 +4,7 @@
 #include "can.h"
 #include <string.h>
 #include "devices/sys_time.h"
+#include "can_boot_protocol.h"
 
 namespace can_comm
 {
@@ -30,10 +31,11 @@ namespace can_comm
          * 001 : feedback
          * 010 : discovery response
          */
-        constexpr uint32_t device_id_mask = 0x03FFFFFF;
+        constexpr uint32_t device_id_mask = CAN_DEVICE_ID_MASK;
         constexpr uint32_t command_base  = 0x00000000;
         constexpr uint32_t feedback_base = 0x04000000;
         constexpr uint32_t response_base = 0x08000000;
+        constexpr uint32_t boot_ctrl_base = CAN_BOOT_CTRL_BASE;
 
         // STM32F103 96-bit Unique Device ID 起始地址
         constexpr uintptr_t uid_address = 0x1FFFF7E8UL;
@@ -43,6 +45,7 @@ namespace can_comm
         uint32_t command_id = 0;
         uint32_t feedback_id = 0;
         uint32_t response_id = 0;
+        uint32_t boot_ctrl_id = 0;
 
         volatile int32_t latest_target_mNm = 0;
         volatile uint32_t latest_target_time = 0;
@@ -226,6 +229,37 @@ namespace can_comm
             latest_target_mNm = (int32_t)(torque * 1000.0f);
             latest_target_time = sys_time::get_ms_tick();
         }
+
+        /**
+         * @brief 校验 BOOT_ENTER 后写入一次性启动请求并复位
+         */
+        void receive_boot_control(const CAN_RxHeaderTypeDef &header,
+                                  const uint8_t *data)
+        {
+            if(header.IDE != CAN_ID_EXT ||
+               header.RTR != CAN_RTR_DATA ||
+               header.ExtId != boot_ctrl_id ||
+               header.DLC != CAN_BOOT_ENTER_DLC ||
+               data[0] != CAN_BOOT_CTRL_ENTER ||
+               data[1] != CAN_BOOT_PROTOCOL_VERSION ||
+               data[2] != CAN_BOOT_ENTER_MAGIC0 ||
+               data[3] != CAN_BOOT_ENTER_MAGIC1 ||
+               data[4] != CAN_BOOT_ENTER_MAGIC2 ||
+               data[5] != CAN_BOOT_ENTER_MAGIC3)
+            {
+                return;
+            }
+
+            // 复位前立即关闭驱动，避免 Bootloader 接管前仍保持 PWM 输出。
+            HAL_GPIO_WritePin(DRV_EN_GPIO_Port, DRV_EN_Pin, GPIO_PIN_RESET);
+            __HAL_RCC_PWR_CLK_ENABLE();
+            __HAL_RCC_BKP_CLK_ENABLE();
+            HAL_PWR_EnableBkUpAccess();
+            BKP->DR1 = CAN_BOOT_BKP_DR1_MAGIC;
+            BKP->DR2 = CAN_BOOT_BKP_DR2_MAGIC;
+            __DSB();
+            NVIC_SystemReset();
+        }
         
         /**
          * @brief CAN FIFO0 接收处理
@@ -257,6 +291,14 @@ namespace can_comm
                 receive_target(header, data);
                 return;
             }
+
+            // 在验证 exact magic 之后，请求重启进入CAN引导加载程序
+            if(header.IDE == CAN_ID_EXT &&
+               header.ExtId == boot_ctrl_id)
+            {
+                receive_boot_control(header, data);
+                return;
+            }
         }
     }
 
@@ -273,6 +315,7 @@ namespace can_comm
         command_id = command_base | device_id;
         feedback_id = feedback_base | device_id;
         response_id = response_base | device_id;
+        boot_ctrl_id = boot_ctrl_base | device_id;
 
         /**
          * Filter Bank 0
@@ -294,6 +337,16 @@ namespace can_comm
          * EXT command_id
          */
         if(!config_exact_filter(1,command_id, true))
+        {
+            return false;
+        }
+
+        /**
+         * Filter Bank 2
+         *
+         * 仅接收发送给本设备的 Bootloader 控制帧。
+         */
+        if(!config_exact_filter(2, boot_ctrl_id, true))
         {
             return false;
         }

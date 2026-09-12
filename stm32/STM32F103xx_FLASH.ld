@@ -7,7 +7,7 @@
 **  Author		: STM32CubeMX
 **
 **  Abstract    : Linker script for STM32F103C6Tx series
-**                32Kbytes FLASH and 10Kbytes RAM
+**                23Kbytes application FLASH and 10Kbytes RAM
 **
 **                Set heap size, stack size and stack location according
 **                to application requirements.
@@ -56,7 +56,7 @@ ENTRY(Reset_Handler)
 MEMORY
 {
 RAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 10K
-FLASH (rx)      : ORIGIN = 0x8000000, LENGTH = 32K
+FLASH (rx)      : ORIGIN = 0x08002000, LENGTH = 23K
 }
 
 /* Highest address of the user mode stack */
