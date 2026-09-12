@@ -41,10 +41,7 @@ extern "C" void app_init(void)
     error |= !can_comm::init();
     error |= !motor::init();
 
-    if(error)
-    {
-        led::set_error(true);
-    }
+    led::set_error(error);
 
     task_list();
 }
