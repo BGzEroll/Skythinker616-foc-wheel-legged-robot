@@ -4,7 +4,6 @@
 namespace motor
 {
     bool init();
-    bool has_fault();
 }
 
 #endif

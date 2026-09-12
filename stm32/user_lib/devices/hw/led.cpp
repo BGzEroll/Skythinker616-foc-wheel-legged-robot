@@ -67,13 +67,14 @@ namespace led
      */
     void leds_proc(uint32_t tick_ms)
     {
-        if(error || motor::has_fault())
+        if(error)
         {
             normal_led.off();
             err_led.on();
             return;
         }
 
+        err_led.off();
         normal_led_blink(tick_ms);
     }
 }

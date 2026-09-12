@@ -47,7 +47,6 @@ namespace motor
 
         int8_t direction = 0;
         phase_t zero_phase = 0;
-        volatile bool fault = false;
 
         /**
          * @brief Q15 × Q15 -> Q15
@@ -307,13 +306,10 @@ namespace motor
          */
         void update()
         {
-            fault = false;
-
             encoder_package encoder;
             if(!as5600::get_package(encoder))
             {
                 svpwm(0, 0);
-                fault = true;
                 return;
             }
 
@@ -413,11 +409,6 @@ namespace motor
         }
 
         return true;
-    }
-
-    bool has_fault()
-    {
-        return fault;
     }
 }
 
