@@ -10,59 +10,85 @@ namespace motor
 {
     namespace
     {
-        constexpr float pi_2 = 1.57079632679489661923f;
-        constexpr float three_pi_2 = 4.71238898038468985769f;
-        constexpr float two_pi = 6.28318530717958647692f;
-        constexpr float sqrt_three_half = 0.86602540378443864676f;
+        using q15_t = int32_t;
+        using phase_t = uint16_t;
 
-        // 电机 / 驱动固定参数
-        constexpr uint8_t pole_pairs = 7;
-        constexpr float phase_resistance = 2.55f;
-        constexpr float torque_constant = 0.0434f;      // Kt
-        constexpr float bemf_constant = 0.02506f;       // KV = 220 RPM/V，则 BLDC q-axis voltage convention: Ke = 30 / (pi * sqrt(3) * KV)
-        constexpr float bus_voltage = 12.0f;
-        constexpr float voltage_limit = 12.0f;
+        constexpr q15_t Q15_ONE = 32768;
+        constexpr q15_t Q15_HALF = 16384;
 
-        // SVPWM 最大可用 q 轴电压约为 Vbus / sqrt(3)
-        constexpr float svpwm_limit = bus_voltage * 0.57735026918962576451f;
-        constexpr float output_limit =
-            voltage_limit < svpwm_limit
-                ? voltage_limit
-                : svpwm_limit;
+        // 电机参数
+        constexpr int32_t pole_pairs = 7;
 
-        constexpr float bus_voltage_inv = 1.0f / bus_voltage;
+        // Q15 常量
+        constexpr q15_t SQRT3_HALF = 28378;     // sqrt(3) / 2
+        constexpr q15_t OUTPUT_LIMIT = 18919;   // 1 / sqrt(3)
+        constexpr q15_t ALIGNMENT_UQ = 8192;    // 3V / 12V
 
         // 编码器校准参数
-        constexpr float alignment_voltage = 3.0f;
         constexpr uint16_t direction_steps = 100;
-        constexpr float direction_min_delta = two_pi / 100.0f;
+        constexpr int32_t direction_min_count = 41;
 
-        // CAN 指令超过该时间未更新则停止输出
-        constexpr uint32_t command_timeout_ms = 100;
+        /*
+         * torque_mNm -> normalized Uq Q15
+         *
+         * R = 2.55 Ω
+         * Kt = 0.0434 Nm/A
+         * Vbus = 12 V
+         */
+        constexpr int32_t TORQUE_GAIN_Q8 = 41073;
+
+        /*
+         * speed_mrad_s -> normalized BEMF Q15
+         *
+         * Ke = 0.02506 V/(rad/s)
+         * Vbus = 12 V
+         */
+        constexpr int32_t BEMF_GAIN_Q16 = 4485;
 
         int8_t direction = 0;
-        float zero_angle = 0.0f;
+        phase_t zero_phase = 0;
 
         /**
-         * @brief 将角度归一化到 [0, 2π)
+         * @brief Q15 × Q15 -> Q15
+         *
+         * @param a Q15 输入
+         * @param b Q15 输入
+         *
+         * @return Q15 乘法结果
          */
-        float normalize_angle(float angle)
+        inline q15_t mul_q15(q15_t a, q15_t b)
         {
-            while(angle >= two_pi){angle -= two_pi;}
-            while(angle < 0.0f){angle += two_pi;}
-            return angle;
+            return (a * b) >> 15;
         }
 
         /**
-         * @brief 正弦查表
+         * @brief AS5600 count 转 16-bit phase
+         *
+         * 4096 count/rev -> 65536 phase/rev
+         *
+         * @param count AS5600 累计计数
+         *
+         * @return 16-bit 机械角 phase
+         */
+        inline phase_t get_phase(int32_t count)
+        {
+            return (phase_t)((uint32_t)count << 4);
+        }
+
+        /**
+         * @brief Q15 正弦查表
          *
          * phase:
          * 0x0000 -> 0
          * 0x4000 -> π/2
          * 0x8000 -> π
          * 0xC000 -> 3π/2
+         *
+         * @param phase 16-bit 相位
+         *
+         * @return Q15 正弦值
          */
-        float lookup_sin(uint16_t phase)
+        q15_t lookup_sin(phase_t phase)
         {
             static const uint16_t table[65] =
             {
@@ -103,88 +129,41 @@ namespace motor
                 b = -table[255 - index];
             }
 
-            return (float)(
-                a + (((b - a) * fraction) >> 8)
-            ) / 32768.0f;
+            return a + (((b - a) * fraction) >> 8);
         }
 
         /**
-         * @brief 同时计算 sin / cos
-         */
-        void sin_cos(float angle, float &sine, float &cosine)
-        {
-            constexpr float rad_to_phase = 65536.0f / two_pi;
-
-            const uint16_t phase = (uint16_t)(angle * rad_to_phase);
-
-            sine = lookup_sin(phase);
-
-            // cos(x) = sin(x + π/2)
-            cosine = lookup_sin((uint16_t)(phase + 16384));
-        }
-
-        /**
-         * @brief SpaceVectorPWM 核心路径
+         * @brief Space Vector PWM
          *
-         * voltage 为 q 轴目标电压
-         * d 轴固定为 0
-         *
-         * 内部完成：
-         * inverse Park
-         * inverse Clarke
-         * SVPWM 零序注入
-         * TIM2 PWM 输出
+         * @param uq q 轴归一化电压，Q15
+         * @param phase 16-bit 电角度
          */
-        void svpwm(float voltage, float angle)
+        void svpwm(q15_t uq, phase_t phase)
         {
-            // NaN 保护
-            if(!(voltage == voltage))
+            if(uq > OUTPUT_LIMIT)
             {
-                voltage = 0.0f;
+                uq = OUTPUT_LIMIT;
+            }
+            else if(uq < -OUTPUT_LIMIT)
+            {
+                uq = -OUTPUT_LIMIT;
             }
 
-            // 输出电压限制
-            if(voltage > output_limit)
-            {
-                voltage = output_limit;
-            }
-            else if(voltage < -output_limit)
-            {
-                voltage = -output_limit;
-            }
+            const q15_t sine = lookup_sin(phase);
+            const q15_t cosine = lookup_sin((phase_t)(phase + 0x4000));
 
-            angle = normalize_angle(angle);
+            // Inverse Park
+            const q15_t alpha = -mul_q15(sine, uq);
+            const q15_t beta = mul_q15(cosine, uq);
 
-            float sine, cosine;
-            sin_cos(angle, sine, cosine);
-
-            /*
-             * Ud = 0
-             *
-             * inverse Park:
-             *
-             * alpha = -sin(theta) * Uq
-             * beta  =  cos(theta) * Uq
-             *
-             * 提前归一化到母线电压。
-             */
-            const float uq = voltage * bus_voltage_inv;
-
-            const float alpha = -sine * uq;
-            const float beta = cosine * uq;
-
-            // inverse Clarke
-            float phase_a = alpha;
-            float phase_b =
-                -0.5f * alpha +
-                sqrt_three_half * beta;
-            float phase_c =
-                -0.5f * alpha -
-                sqrt_three_half * beta;
+            // Inverse Clarke
+            q15_t phase_a = alpha;
+            q15_t phase_b = -(alpha >> 1) + mul_q15(SQRT3_HALF, beta);
+            q15_t phase_c = -(alpha >> 1) - mul_q15(SQRT3_HALF, beta);
 
             // SVPWM 零序注入
-            float phase_min = phase_a;
-            float phase_max = phase_a;
+            q15_t phase_min = phase_a;
+            q15_t phase_max = phase_a;
 
             if(phase_b < phase_min){phase_min = phase_b;}
             if(phase_c < phase_min){phase_min = phase_c;}
@@ -192,35 +171,39 @@ namespace motor
             if(phase_b > phase_max){phase_max = phase_b;}
             if(phase_c > phase_max){phase_max = phase_c;}
 
-            const float offset =
-                0.5f -
-                0.5f * (phase_max + phase_min);
+            const q15_t offset =
+                Q15_HALF -
+                ((phase_max + phase_min) >> 1);
 
             phase_a += offset;
             phase_b += offset;
             phase_c += offset;
 
-            // 最终安全限幅
-            if(phase_a < 0.0f){phase_a = 0.0f;}
-            else if(phase_a > 1.0f){phase_a = 1.0f;}
+            // Duty 限幅
+            if(phase_a < 0){phase_a = 0;}
+            else if(phase_a > Q15_ONE){phase_a = Q15_ONE;}
 
-            if(phase_b < 0.0f){phase_b = 0.0f;}
-            else if(phase_b > 1.0f){phase_b = 1.0f;}
+            if(phase_b < 0){phase_b = 0;}
+            else if(phase_b > Q15_ONE){phase_b = Q15_ONE;}
 
-            if(phase_c < 0.0f){phase_c = 0.0f;}
-            else if(phase_c > 1.0f){phase_c = 1.0f;}
+            if(phase_c < 0){phase_c = 0;}
+            else if(phase_c > Q15_ONE){phase_c = Q15_ONE;}
 
-            TIM2->CCR1 = (uint32_t)(phase_a * 1600.0f + 0.5f);
-            TIM2->CCR2 = (uint32_t)(phase_b * 1600.0f + 0.5f);
-            TIM2->CCR3 = (uint32_t)(phase_c * 1600.0f + 0.5f);
+            // Q15 duty -> TIM2 CCR
+            TIM2->CCR1 = (phase_a * 1600 + Q15_HALF) >> 15;
+            TIM2->CCR2 = (phase_b * 1600 + Q15_HALF) >> 15;
+            TIM2->CCR3 = (phase_c * 1600 + Q15_HALF) >> 15;
         }
 
         /**
          * @brief 自动检测编码器方向并校准零电角
+         *
+         * @return true 校准成功
+         * @return false 校准失败
          */
         bool calibrate()
         {
-            encoder_package encoder = {};
+            encoder_package encoder;
 
             // 等待编码器第一帧数据
             const uint32_t start = sys_time::get_ms_tick();
@@ -239,17 +222,19 @@ namespace motor
                 DRV_EN_Pin,GPIO_PIN_SET
             );
 
-            const float start_angle = encoder.full_angle;
+            const int32_t start_count = encoder.full_count;
 
             for(uint16_t i = 0; i <= direction_steps; ++i)
             {
-                svpwm(
-                    alignment_voltage,
-                    three_pi_2 +
-                    two_pi *
-                    (float)i /
-                    (float)direction_steps
-                );
+                const phase_t phase =
+                    (phase_t)(
+                        0xC000u +
+                        (uint32_t)i *
+                        65536u /
+                        direction_steps
+                    );
+
+                svpwm(ALIGNMENT_UQ, phase);
 
                 as5600::update();
                 sys_time::delay_ms(2);
@@ -257,12 +242,12 @@ namespace motor
 
             if(!as5600::get_package(encoder)){return false;}
 
-            const float delta = encoder.full_angle - start_angle;
-            if(delta > direction_min_delta)
+            const int32_t delta = encoder.full_count - start_count;
+            if(delta > direction_min_count)
             {
                 direction = 1;
             }
-            else if(delta < -direction_min_delta)
+            else if(delta < -direction_min_count)
             {
                 direction = -1;
             }
@@ -271,8 +256,8 @@ namespace motor
                 return false;
             }
 
-            // 电角度对齐
-            svpwm(0.0f, 0.0f);
+            // 停止输出
+            svpwm(0, 0);
 
             HAL_GPIO_WritePin(
                 DRV_EN_GPIO_Port,
@@ -280,10 +265,8 @@ namespace motor
                 GPIO_PIN_RESET
             );
 
-            svpwm(
-                alignment_voltage,
-                three_pi_2
-            );
+            // 固定到 3π/2
+            svpwm(ALIGNMENT_UQ, 0xC000);
 
             HAL_GPIO_WritePin(
                 DRV_EN_GPIO_Port,
@@ -303,13 +286,15 @@ namespace motor
                 return false;
             }
 
-            zero_angle = normalize_angle(
-                (float)direction *
-                (float)pole_pairs *
-                encoder.angle
-            );
+            // 记录当前电角度作为零点
+            zero_phase =
+                (phase_t)(
+                    (int32_t)direction *
+                    pole_pairs *
+                    (int32_t)get_phase(encoder.full_count)
+                );
 
-            svpwm(0.0f, 0.0f);
+            svpwm(0, 0);
 
             HAL_GPIO_WritePin(
                 DRV_EN_GPIO_Port,
@@ -330,33 +315,29 @@ namespace motor
             encoder_package encoder;
             if(!as5600::get_package(encoder))
             {
-                svpwm(0.0f, 0.0f);
+                svpwm(0, 0);
                 return;
             }
 
-            const float electrical_angle =
-                (float)direction *
-                (float)pole_pairs *
-                encoder.angle -
-                zero_angle;
+            const phase_t electrical_phase =
+                (phase_t)(
+                    (int32_t)direction *
+                    pole_pairs *
+                    (int32_t)get_phase(encoder.full_count) -
+                    (int32_t)zero_phase
+                );
 
-            const float torque_target = can_comm::get_target();
+            const float torque_mNm = can_comm::get_target_mNm();
 
-            // Nm -> q-axis current
-            float current = torque_target / torque_constant;
+            const int32_t speed_mrad_s = (int32_t)direction * encoder.speed_mrad_s;
 
-            const float velocity = (float)direction * encoder.speed;
-            
+            // Torque -> normalized Uq
+            const q15_t torque_uq = (torque_mNm * TORQUE_GAIN_Q8) >> 8;
+
             // Back-EMF compensation
-            const float bemf = bemf_constant * velocity;
-
-            // Estimated-current voltage model
-            const float voltage =
-                current *
-                phase_resistance +
-                bemf;
+            const q15_t bemf_uq = (speed_mrad_s * BEMF_GAIN_Q16) >> 16;
             
-            svpwm(voltage, electrical_angle);
+            svpwm(torque_uq + bemf_uq, electrical_phase);
         }
     }
 
@@ -372,7 +353,7 @@ namespace motor
             GPIO_PIN_RESET
         );
 
-        // 防止 TIM2 初始化阶段残留中断状态
+        // 清理中断状态
         __HAL_TIM_DISABLE_IT(&htim2, TIM_IT_UPDATE);
         __HAL_TIM_DISABLE_IT(&htim2, TIM_IT_CC4);
         __HAL_TIM_CLEAR_FLAG(&htim2, TIM_FLAG_UPDATE);
@@ -389,12 +370,12 @@ namespace motor
             return false;
         }
 
-        svpwm(0.0f, 0.0f);
+        svpwm(0, 0);
 
         // 编码器方向和零电角自动校准
         if(!calibrate())
         {
-            svpwm(0.0f, 0.0f);
+            svpwm(0, 0);
 
             HAL_GPIO_WritePin(
                 DRV_EN_GPIO_Port,
