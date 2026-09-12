@@ -84,7 +84,7 @@ namespace
     }
 }
 
-static encoder_package latest_package = {};
+static encoder_package latest_package;
 
 namespace as5600
 {
@@ -94,10 +94,19 @@ namespace as5600
         constexpr uint8_t reg_raw_angle = 0x0C;
 
         constexpr int32_t resolution = 4096;
-        constexpr int32_t half_resolution = resolution / 2;
-        constexpr float count_to_rad = 2.0f * 3.14159265358979323846f / (float)resolution;
+        constexpr int32_t half_resolution =
+            resolution / 2;
 
-        constexpr float speed_filter_tf = 0.003f;       // 3ms
+        /*
+         * count/us -> mrad/s
+         *
+         * 2π / 4096 * 1000 * 1000000
+         * ≈ 1533980.788
+         */
+        constexpr int32_t speed_scale = 1533981;
+
+        // 速度一阶低通滤波时间常数 3 ms
+        constexpr int32_t speed_filter_us = 3000;
 
         uint8_t raw_data[2];
 
@@ -107,6 +116,7 @@ namespace as5600
 
         uint16_t last_raw = 0;
         uint16_t last_time_us = 0;
+
         int32_t speed_mrad_s = 0;
         int32_t full_count = 0;
         
@@ -153,18 +163,42 @@ namespace as5600
                 const uint16_t dt_us = (uint16_t)(now_us - last_time_us);
                 if(dt_us != 0)
                 {
-                    const float dt = (float)dt_us * 0.000001f;
-                    const float raw_speed = (float)delta * count_to_rad / dt * 1000.0f;
-                    const float alpha = dt / (speed_filter_tf + dt);
-                    speed_mrad_s += (int32_t)(alpha * (raw_speed - speed_mrad_s));
+                    /*
+                     * 一阶低通速度估计：
+                     *
+                     * raw_speed = delta * scale / dt
+                     *
+                     * alpha = dt / (Tf + dt)
+                     *
+                     * speed +=
+                     *     alpha *
+                     *     (raw_speed - speed)
+                     *
+                     * 化简为：
+                     *
+                     * speed =
+                     * (
+                     *     speed * Tf +
+                     *     delta * scale
+                     * ) /
+                     * (Tf + dt)
+                     */
+
+                    const int64_t numerator =
+                        (int64_t)speed_mrad_s *
+                        speed_filter_us +
+                        (int64_t)delta *
+                        speed_scale;
+
+                    speed_mrad_s = (int32_t)(numerator / (speed_filter_us + dt_us));
                 }
-                
+
                 last_raw = raw;
                 last_time_us = now_us;
             }
 
             encoder_package new_package;
-            new_package.timestamp_us = (uint16_t)i2c::dma_complete_time_us;
+            new_package.timestamp_us = now_us;
             new_package.full_count = full_count;
             new_package.speed_mrad_s = speed_mrad_s;
 

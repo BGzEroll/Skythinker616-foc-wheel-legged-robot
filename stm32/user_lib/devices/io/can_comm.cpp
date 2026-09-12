@@ -246,7 +246,7 @@ namespace can_comm
                 return;
             }
 
-            // Target voltage
+            // Target torque
             if(header.IDE == CAN_ID_EXT &&
                header.ExtId == command_id)
             {
