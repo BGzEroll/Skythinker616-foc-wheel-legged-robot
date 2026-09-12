@@ -58,10 +58,10 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define DRV_EN_Pin GPIO_PIN_3
 #define DRV_EN_GPIO_Port GPIOA
-#define LED_Pin GPIO_PIN_14
-#define LED_GPIO_Port GPIOB
-#define ERR_LED_Pin GPIO_PIN_15
+#define ERR_LED_Pin GPIO_PIN_14
 #define ERR_LED_GPIO_Port GPIOB
+#define LED_Pin GPIO_PIN_15
+#define LED_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 

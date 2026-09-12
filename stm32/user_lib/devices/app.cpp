@@ -1,8 +1,8 @@
 #include "task.h"
+#include "devices/hw/led.h"
 #include "devices/hw/encoder.h"
 #include "devices/hw/motor.h"
 #include "devices/io/can_comm.h"
-#include "test.h"
 
 /**
  * @brief 任务列表
@@ -10,7 +10,7 @@
 void task_list()
 {
     static task_node led_task;
-    task::create(&led_task, normal_led_blink, 50);
+    task::create(&led_task, led::leds_proc, 50);
 
     static task_node encoder_task;
     task::create(
@@ -35,10 +35,16 @@ void task_list()
  */
 extern "C" void app_init(void)
 {
-    test_init();
-    as5600::init();
-    can_comm::init();
-    motor::init();
+    bool error = false;
+
+    error |= !as5600::init();
+    error |= !can_comm::init();
+    error |= !motor::init();
+
+    if(error)
+    {
+        led::set_error(true);
+    }
 
     task_list();
 }
