@@ -2,7 +2,6 @@
 
 #include "main.h"
 #include "drivers/leds.h"
-#include "devices/hw/motor.h"
 
 namespace led
 {
