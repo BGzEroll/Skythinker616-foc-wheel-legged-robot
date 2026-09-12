@@ -94,8 +94,7 @@ namespace as5600
         constexpr uint8_t reg_raw_angle = 0x0C;
 
         constexpr int32_t resolution = 4096;
-        constexpr int32_t half_resolution =
-            resolution / 2;
+        constexpr int32_t half_resolution = resolution / 2;
 
         /*
          * count/us -> mrad/s
@@ -132,8 +131,7 @@ namespace as5600
                 address,
                 reg_raw_angle,
                 raw_data,
-                sizeof(raw_data)
-            );
+                sizeof(raw_data));
         }
 
         /**

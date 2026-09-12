@@ -120,8 +120,7 @@ namespace can_comm
                  * bit2     = IDE
                  * bit1     = RTR
                  */
-                filter_id =
-                    (id & 0x7FFu) << 21;
+                filter_id = (id & 0x7FFu) << 21;
 
                 filter_mask =
                     (0x7FFu << 21) |

@@ -219,8 +219,7 @@ namespace motor
             // 检测编码器方向
             HAL_GPIO_WritePin(
                 DRV_EN_GPIO_Port,
-                DRV_EN_Pin,GPIO_PIN_SET
-            );
+                DRV_EN_Pin,GPIO_PIN_SET);
 
             const int32_t start_count = encoder.full_count;
 
@@ -231,8 +230,7 @@ namespace motor
                         0xC000u +
                         (uint32_t)i *
                         65536u /
-                        direction_steps
-                    );
+                        direction_steps);
 
                 svpwm(ALIGNMENT_UQ, phase);
 
@@ -262,8 +260,7 @@ namespace motor
             HAL_GPIO_WritePin(
                 DRV_EN_GPIO_Port,
                 DRV_EN_Pin,
-                GPIO_PIN_RESET
-            );
+                GPIO_PIN_RESET);
 
             // 固定电角度到 3π/2
             svpwm(ALIGNMENT_UQ, 0xC000);
@@ -271,8 +268,7 @@ namespace motor
             HAL_GPIO_WritePin(
                 DRV_EN_GPIO_Port,
                 DRV_EN_Pin,
-                GPIO_PIN_SET
-            );
+                GPIO_PIN_SET);
 
             const uint32_t align_start = sys_time::get_ms_tick();
             while(sys_time::get_ms_tick() - align_start < 500)
@@ -291,16 +287,14 @@ namespace motor
                 (phase_t)(
                     (int32_t)direction *
                     pole_pairs *
-                    (int32_t)get_phase(encoder.full_count)
-                );
+                    (int32_t)get_phase(encoder.full_count));
 
             svpwm(0, 0);
 
             HAL_GPIO_WritePin(
                 DRV_EN_GPIO_Port,
                 DRV_EN_Pin,
-                GPIO_PIN_RESET
-            );
+                GPIO_PIN_RESET);
 
             return true;
         }
@@ -324,8 +318,7 @@ namespace motor
                     (int32_t)direction *
                     pole_pairs *
                     (int32_t)get_phase(encoder.full_count) -
-                    (int32_t)zero_phase
-                );
+                    (int32_t)zero_phase);
 
             const int32_t torque_mNm = can_comm::get_target_mNm();
 
@@ -353,8 +346,7 @@ namespace motor
         HAL_GPIO_WritePin(
             DRV_EN_GPIO_Port,
             DRV_EN_Pin,
-            GPIO_PIN_RESET
-        );
+            GPIO_PIN_RESET);
 
         // 清理中断状态
         __HAL_TIM_DISABLE_IT(&htim2, TIM_IT_UPDATE);
@@ -383,8 +375,7 @@ namespace motor
             HAL_GPIO_WritePin(
                 DRV_EN_GPIO_Port,
                 DRV_EN_Pin,
-                GPIO_PIN_RESET
-            );
+                GPIO_PIN_RESET);
 
             HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_1);
             HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_2);
@@ -397,8 +388,7 @@ namespace motor
         HAL_GPIO_WritePin(
             DRV_EN_GPIO_Port,
             DRV_EN_Pin,
-            GPIO_PIN_SET
-        );
+            GPIO_PIN_SET);
 
         // CH4 位于 PWM 中点，用于触发 FOC
         __HAL_TIM_CLEAR_FLAG(&htim2, TIM_FLAG_UPDATE);
@@ -409,8 +399,7 @@ namespace motor
             HAL_GPIO_WritePin(
                 DRV_EN_GPIO_Port,
                 DRV_EN_Pin,
-                GPIO_PIN_RESET
-            );
+                GPIO_PIN_RESET);
 
             HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_1);
             HAL_TIM_PWM_Stop(&htim2, TIM_CHANNEL_2);

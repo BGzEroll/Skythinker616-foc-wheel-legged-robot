@@ -18,8 +18,16 @@ void task_list()
         [](){as5600::update();},
         0);
 
-    static task_node can_comm_test_task;
-    task::create(&can_comm_test_task, can_comm_test, 2);
+    static task_node can_comm_task;
+    task::create(
+        &can_comm_task,
+        []()
+        {
+            static encoder_package package;
+            as5600::get_package(package);
+            can_comm::send_feedback(package);
+        },
+        2);
 }
 
 /**
