@@ -8,9 +8,7 @@ struct encoder_package
     uint16_t timestamp_us = 0;
 
     int32_t full_count = 0;
-    float angle = 0.0f;
-    float full_angle = 0.0f;
-    float speed = 0.0f;
+    int32_t speed_mrad_s = 0;
 };
 
 namespace as5600

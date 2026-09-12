@@ -6,7 +6,7 @@
 namespace can_comm
 {
     bool init();
-    float get_target();
+    int32_t get_target_mNm();
     bool send_feedback(const encoder_package &package);
 }
 

@@ -44,7 +44,7 @@ namespace can_comm
         uint32_t feedback_id = 0;
         uint32_t response_id = 0;
 
-        volatile float latest_target = 0.0f;
+        volatile int32_t latest_target_mNm = 0;
         volatile uint32_t latest_target_time = 0;
     }
 
@@ -219,7 +219,7 @@ namespace can_comm
             float torque;
             memcpy(&torque, data, sizeof(torque));
 
-            latest_target = torque;
+            latest_target_mNm = (int32_t)(torque * 1000.0f);
             latest_target_time = sys_time::get_ms_tick();
         }
         
@@ -312,14 +312,14 @@ namespace can_comm
      *
      * @return 最新的目标
      */
-    float get_target()
+    int32_t get_target_mNm()
     {
         if(sys_time::get_ms_tick() - latest_target_time > 100)
         {
-            return 0.0f;
+            return 0;
         }
 
-        return latest_target;
+        return latest_target_mNm;
     }
 
     /**

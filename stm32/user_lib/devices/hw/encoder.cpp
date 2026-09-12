@@ -107,7 +107,7 @@ namespace as5600
 
         uint16_t last_raw = 0;
         uint16_t last_time_us = 0;
-        float speed = 0.0f;
+        int32_t speed_mrad_s = 0;
         int32_t full_count = 0;
         
         /**
@@ -154,9 +154,9 @@ namespace as5600
                 if(dt_us != 0)
                 {
                     const float dt = (float)dt_us * 0.000001f;
-                    const float raw_speed = (float)delta * count_to_rad / dt;
+                    const float raw_speed = (float)delta * count_to_rad / dt * 1000.0f;
                     const float alpha = dt / (speed_filter_tf + dt);
-                    speed += alpha * (raw_speed - speed);
+                    speed_mrad_s += (int32_t)(alpha * (raw_speed - speed_mrad_s));
                 }
                 
                 last_raw = raw;
@@ -166,9 +166,7 @@ namespace as5600
             encoder_package new_package;
             new_package.timestamp_us = (uint16_t)i2c::dma_complete_time_us;
             new_package.full_count = full_count;
-            new_package.angle = (float)raw * count_to_rad;
-            new_package.full_angle = (float)full_count * count_to_rad;
-            new_package.speed = speed;
+            new_package.speed_mrad_s = speed_mrad_s;
 
             // 使用临界区保护数据包更新，防止中断导致数据不一致
             const uint32_t primask = __get_PRIMASK();
