@@ -53,8 +53,9 @@ namespace can_comm
         /**
          * @brief 根据 STM32 96-bit UID 生成固定 device_id
          *
-         * 使用 FNV-1a Hash，
-         * 最终截取为 26 bit。
+         * 使用 FNV-1a Hash，最终截取为 26 bit。
+         *
+         * @return 26-bit 非零 device_id
          */
         uint32_t make_device_id()
         {
@@ -146,6 +147,14 @@ namespace can_comm
 
         /**
          * @brief 发送 CAN 数据帧
+         *
+         * @param id CAN ID
+         * @param extended true 使用扩展帧，false 使用标准帧
+         * @param data 数据缓冲区
+         * @param size 数据长度
+         *
+         * @return true 成功加入发送邮箱
+         * @return false 参数无效或发送失败
          */
         bool send_frame(uint32_t id, bool extended, const uint8_t *data, uint8_t size)
         {
@@ -184,12 +193,8 @@ namespace can_comm
         /**
          * @brief 回复设备发现
          *
-         * Extended CAN ID:
-         *
-         * response_base | device_id
-         *
-         * CAN ID 本身已经包含设备身份，
-         * 因此无需 payload。
+         * @return true 发送成功
+         * @return false 发送失败
          */
         bool send_device_response()
         {
@@ -308,9 +313,11 @@ namespace can_comm
     }
 
     /**
-     * @brief 获取最新的目标
+     * @brief 获取目标扭矩
      *
-     * @return 最新的目标
+     * 超过 100 ms 未收到新指令时返回 0
+     *
+     * @return 目标扭矩，单位 mN·m
      */
     int32_t get_target_mNm()
     {

@@ -30,7 +30,7 @@ namespace
          * @param size 数据长度（字节）
          * 
          * @return true 成功发起 DMA 读取
-         * @return false 发起失败（参数错误或 DMA 正在忙碌）
+         * @return false 参数无效、DMA 忙或 HAL 启动失败
          */
         bool dma_read_bytes(uint16_t dev_addr, uint8_t reg_addr, uint8_t *data, uint16_t size)
         {
@@ -111,7 +111,7 @@ namespace as5600
         uint8_t raw_data[2];
 
         bool initialized = false;
-        bool package_valid = false;
+        volatile bool package_valid = false;
         bool first_sample = true;
 
         uint16_t last_raw = 0;
@@ -124,7 +124,7 @@ namespace as5600
          * @brief 发起一次 DMA 读取
          * 
          * @return true 成功发起 DMA 读取
-         * @return false 发起失败（参数错误或 DMA 正在忙碌）
+         * @return false 发起失败
          */
         bool start_read()
         {
@@ -231,8 +231,8 @@ namespace as5600
     /**
      * @brief 更新编码器数据包
      * 
-     * @return true 数据包已更新（DMA 读取完成）
-     * @return false 数据包未更新（DMA 正在忙碌或出错）
+     * @return true 完成一次新数据处理
+     * @return false 当前无新数据或读取失败
      */
     bool update()
     {
@@ -268,10 +268,10 @@ namespace as5600
     /**
      * @brief 获取最新的编码器数据包
      * 
-     * @param package 编码器数据包引用
+     * @param snapshot 编码器数据包引用
      * 
      * @return true 成功获取数据包
-     * @return false 未能获取数据包（编码器未初始化）
+     * @return false 编码器未初始化或尚无有效数据
      */
     bool get_package(encoder_package &snapshot)
     {

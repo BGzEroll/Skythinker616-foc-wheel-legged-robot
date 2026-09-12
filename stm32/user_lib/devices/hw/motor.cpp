@@ -10,7 +10,7 @@ namespace motor
 {
     namespace
     {
-        using q15_t = int32_t;
+        using q15_t = int32_t;      // Q15 标度：1.0 = 32768，使用 int32_t 保存
         using phase_t = uint16_t;
 
         constexpr q15_t Q15_ONE = 32768;
@@ -21,8 +21,8 @@ namespace motor
 
         // Q15 常量
         constexpr q15_t SQRT3_HALF = 28378;     // sqrt(3) / 2
-        constexpr q15_t OUTPUT_LIMIT = 18919;   // 1 / sqrt(3)
-        constexpr q15_t ALIGNMENT_UQ = 8192;    // 3V / 12V
+        constexpr q15_t OUTPUT_LIMIT = 18919;   // SVPWM 线性区 Uq/Vbus = 1/sqrt(3)
+        constexpr q15_t ALIGNMENT_UQ = 8192;    // 校准电压 3V / 12V
 
         // 编码器校准参数
         constexpr uint16_t direction_steps = 100;
@@ -86,7 +86,7 @@ namespace motor
          *
          * @param phase 16-bit 相位
          *
-         * @return Q15 正弦值
+         * @return Q15 标度正弦值，1.0 = 32768
          */
         q15_t lookup_sin(phase_t phase)
         {
@@ -265,7 +265,7 @@ namespace motor
                 GPIO_PIN_RESET
             );
 
-            // 固定到 3π/2
+            // 固定电角度到 3π/2
             svpwm(ALIGNMENT_UQ, 0xC000);
 
             HAL_GPIO_WritePin(
